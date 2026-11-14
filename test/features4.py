@@ -135,13 +135,16 @@ with sync_playwright() as p:
     xb = hero(B, code, 'Beto')['stats']['xp']
     T(xb > 0, f'Beto cumpriu a missão (+{xb} XP)')
     A.reload(); W(A, 2500); close_modal(A); settings(A)
-    A.click(f'xpath=//section[.//h3[text()="Feitas hoje"]]//li[contains(.,"Lavar a louça")]//button[@data-act="reopenBoard"]'); W(A, 400)
+    T('Feitas hoje' not in A.inner_text('body'), 'a Sala não tem mais a lista "Feitas hoje" (reabrir fica em Tarefas)')
+    nav.menu(A, 'today', 600)
+    A.click(f'xpath=//li[contains(@class,"task")][.//div[@class="t" and starts-with(normalize-space(.),"Lavar a louça")]]//button[@data-act="reopenBoard"]'); W(A, 400)
     A.click('[data-act=reopenOk]'); W(A, 1200)
     bd = next(v for k, v in docs(A, code).items() if k.startswith('board/'))
     T(not bd.get('done'), 'missão volta a ficar pendente')
     B.reload(); W(B, 3500); close_modal(B)
     T(hero(B, code, 'Beto')['stats']['xp'] == 0, 'o XP sai de quem cumpriu')
     # ---------- expulsar ----------
+    settings(A)
     A.click(f'xpath=//ul[contains(@class,"kick-list")]//li[contains(.,"Beto")]//button[@data-act="askKick"]'); W(A, 400)
     A.fill('#kick-in', 'expulsar'); A.click('form[data-form=kick] button[type=submit]'); W(A, 400)
     T('EXPULSAR' in A.inner_text('.modal'), 'precisa escrever EXPULSAR em maiúsculas')

@@ -43,9 +43,15 @@ with sync_playwright() as p:
     cb = b.new_context(viewport={'width': 1280, 'height': 900}); cb.add_init_script("localStorage.setItem('guilda-notut','1')")
     A, B = ca.new_page(), cb.new_page()
     for P in (A, B): P.on('pageerror', lambda e: errs.append(str(e)))
-    A.goto(URL); W(A, 1500); register(A, f'ana{stamp}@ex.com')
+    A.goto(URL); W(A, 1500)
+    T(A.query_selector('#cover-root:not([hidden]) #scene .bu.hero') is not None, 'capa com batalha na tela de entrada')
+    w1 = A.evaluate("[...document.querySelectorAll('#units .bar i')].map(e=>e.style.width).join()"); W(A, 4000)
+    w2 = A.evaluate("[...document.querySelectorAll('#units .bar i')].map(e=>e.style.width).join()")
+    T(w1 != w2, 'a batalha da capa está andando')
+    register(A, f'ana{stamp}@ex.com')
     A.fill('#room-name', 'Casa'); A.press('#room-name', 'Enter'); W(A, 2500)
     code = A.evaluate("JSON.parse(localStorage.getItem('guilda-last-room'))")
+    T(A.query_selector('#cover-root:not([hidden])') is None, 'capa some dentro da sala')
     new_hero(A, 'Ana', 'gelo')
     T(A.evaluate("document.documentElement.dataset.cls") == 'gelo', 'tema de Ana (Mago de Gelo) aplicado na sala')
     T('--motif' in (A.evaluate("document.documentElement.getAttribute('style')") or ''), 'fundo com símbolo da classe')
@@ -106,6 +112,29 @@ with sync_playwright() as p:
     W(B, 5600); nav.menu(B, 'today', 600)
     rb = 'xpath=//li[contains(@class,"task")][.//div[@class="t" and starts-with(normalize-space(.),"Para o Beto")]]//button[contains(@class,"done-btn")]'
     T(B.query_selector(rb) is not None and not B.query_selector(rb).is_disabled(), 'Beto pode cumprir a missão dele')
+
+    # ---------- organizador (Ana) controla as tarefas do Beto ----------
+    add_task(B, 'Varrer a sala'); add_task(B, 'Estender roupa'); add_task(B, 'Cancelar esta')
+    B.click('xpath=//li[contains(@class,"task")][.//div[@class="t" and normalize-space(.)="Estender roupa"]]//button[@data-act="done"]'); W(B, 900); close_modal(B)
+    T(B.query_selector('xpath=//li[contains(@class,"task") and contains(@class,"done") and not(contains(@class,"other"))][.//div[@class="t" and normalize-space(.)="Estender roupa"]]') is not None, 'quem não é organizador continua vendo a própria tarefa feita, marcada')
+    W(A, 5600); nav.menu(A, 'today', 600)
+    ob = lambda t: f'xpath=//li[contains(@class,"task") and contains(@class,"other")][.//div[@class="t" and normalize-space(.)="{t}"]]'
+    T(A.query_selector(ob('Varrer a sala') + '//button[@data-act="editTask"]') is not None and A.query_selector(ob('Varrer a sala') + '//button[@data-act="delOther"]') is not None, 'organizador vê editar e cancelar na tarefa do Beto')
+    T(A.query_selector(ob('Estender roupa') + '//button[@data-act="reopenTask"]') is not None, 'organizador vê reiniciar na tarefa que o Beto concluiu')
+    T(A.query_selector(ob('Varrer a sala') + '//button[@data-act="done"]') is None, 'organizador continua sem concluir pelo Beto')
+    T(B.query_selector(ob('Minha tarefa') + '//button[@data-act="editTask"]') is None, 'quem não é organizador não ganha os botões nas tarefas dos outros')
+    A.click(ob('Varrer a sala') + '//button[@data-act="editTask"]'); W(A, 500)
+    A.fill('#ed-title', 'Varrer a casa toda'); A.click('.modal [type=submit]'); W(A, 900)
+    T('Varrer a casa toda' in A.inner_text('body'), 'edição aparece na hora para o organizador')
+    A.click(ob('Cancelar esta') + '//button[@data-act="delOther"]'); W(A, 400); A.click('[data-act=delOtherOk]'); W(A, 900)
+    T('Cancelar esta' not in A.inner_text('.today'), 'tarefa cancelada some da lista')
+    xp0 = hero(A, code, 'Beto')['xp']
+    A.click(ob('Estender roupa') + '//button[@data-act="reopenTask"]'); W(A, 400); A.click('[data-act=reopenOk]'); W(A, 900)
+    W(B, 6500); W(B, 1500)
+    hb = hero(B, code, 'Beto'); tb = {t['title']: t for t in hb['tasks']}
+    T('Varrer a casa toda' in tb and 'Varrer a sala' not in tb, f'Beto recebe a edição: {list(tb)}')
+    T('Cancelar esta' not in tb, 'Beto recebe o cancelamento')
+    T(not tb.get('Estender roupa', {}).get('done') and hb['xp'] < xp0, f'Beto recebe o reinício e perde o XP ({xp0} → {hb["xp"]})')
 
     A.screenshot(path='/tmp/f8_today_mob.png', full_page=True)
     B.screenshot(path='/tmp/f8_today_desk.png', full_page=True)

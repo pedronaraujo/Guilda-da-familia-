@@ -1,9 +1,18 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "guilda-da-familia",
+  "main": "worker/index.js",
   "compatibility_date": "2026-11-13",
   "observability": { "enabled": true },
   "workers_dev": true,
   "preview_urls": false,
-  "assets": { "directory": "public" }
+  // O site em si: public/index.html. Pedidos que não são arquivos (como /api/...) vão para o worker.
+  "assets": { "directory": "public", "binding": "ASSETS" },
+  // Cada sala da guilda vive num Durable Object com banco SQLite próprio.
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+  },
+  "exports": {
+    "Room": { "type": "durable-object", "storage": "sqlite" }
+  }
 }

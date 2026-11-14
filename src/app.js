@@ -24,7 +24,8 @@
 
   /* ---------------- Armazenamento ----------------
      Cada sala guarda seus documentos em rooms/<CÓDIGO>/...: heroes/<id>, party/main, board/<id>, rewards/<id>, chores/<id>.
-     Três modos: banco do Claude (claude.use("db")), Google Apps Script (google.script.run) ou só este aparelho. */
+     Quatro modos: Google Apps Script (google.script.run), banco do Claude (claude.use("db")),
+     servidor próprio na Cloudflare (/api/..., mesmas funções do Apps Script) ou só este aparelho. */
   function applyDocs(docs) {
     const heroes = {}, board = {}, rewards = {}, chores = {}, inbox = {}, activity = {}, requests = {}; let party = null;
     for (const [path, data] of Object.entries(docs || {})) {
@@ -41,7 +42,22 @@
     }
     S.heroes = heroes; S.board = board; S.rewards = rewards; S.chores = chores; S.inbox = inbox; S.activity = activity; S.requests = requests; S.party = party;
   }
-  const gas = (fn, ...args) => new Promise((res, rej) => window.google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...args));
+  let gas = (fn, ...args) => new Promise((res, rej) => window.google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...args));
+  // Servidor próprio (Cloudflare): POST /api/<função> com os argumentos em JSON
+  const serverCall = async (fn, ...args) => {
+    const r = await fetch('/api/' + fn, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(args), cache: 'no-store' });
+    let j = null; try { j = await r.json(); } catch (e) { j = null; }
+    if (!r.ok || (j && typeof j === 'object' && j.error)) throw new Error((j && j.error) || 'HTTP ' + r.status);
+    return j;
+  };
+  async function hasServer() {
+    if (!/^https?:$/.test(location.protocol)) return false;
+    try {
+      const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 4000);
+      const r = await fetch('/api/ping', { cache: 'no-store', signal: ctl.signal }); clearTimeout(t);
+      const j = r.ok ? await r.json() : null; return !!(j && j.guilda);
+    } catch (e) { return false; }
+  }
   const COLS = ['heroes', 'board', 'rewards', 'chores', 'inbox', 'activity', 'requests'];
   const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const newCode = () => Array.from({ length: 6 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
@@ -56,6 +72,11 @@
       if (db) {
         this.db = db; S.mode = 'shared';
         try { const user = await window.claude.use('user'); if (user) { const can = await user.can('data.write'); if (can === false) S.readOnly = true; } } catch (e) { /* ok */ }
+        return;
+      }
+      if (await hasServer()) {
+        gas = serverCall; S.mode = 'gas'; this.server = true;
+        document.addEventListener('visibilitychange', () => { if (!document.hidden && S.room) this.poll(); });
         return;
       }
       S.mode = 'local';
@@ -85,7 +106,7 @@
       }
       if (S.mode === 'gas') {
         await this.poll();
-        this.pollTimer = setInterval(() => { if (!document.hidden) this.poll(); }, 20000);
+        this.pollTimer = setInterval(() => { if (!document.hidden) this.poll(); }, this.server ? 5000 : 20000);
         return;
       }
       await new Promise((resolve) => {

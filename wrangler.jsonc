@@ -8,6 +8,7 @@
   "preview_urls": false,
   // O site em si: public/index.html. Pedidos que não são arquivos (como /api/...) vão para o worker.
   "assets": { "directory": "public", "binding": "ASSETS" },
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
   // Cada sala da guilda e cada conta vivem num Durable Object com banco SQLite próprio.
   "durable_objects": {
     "bindings": [

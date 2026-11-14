@@ -114,6 +114,54 @@ export class Room extends DurableObject {
     await this.ctx.storage.put('meta', meta); await this.bump();
     return this.out(room);
   }
+  /* ----- Cópias de segurança dos dados da sala -----
+     Feitas sozinhas: antes da primeira gravação de cada versão nova do app (ou seja, com os dados
+     como a versão anterior deixou) e uma vez por dia. Ficam as 14 mais recentes. */
+  async autoSnap(ver) {
+    if (!(await this.meta())) return;
+    const day = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+    const st = (await this.ctx.storage.get('snapState')) || {};
+    let label = null;
+    if (ver && st.ver && st.ver !== ver) label = 'Antes da atualização do app';
+    else if (st.day !== day) label = st.day ? 'Cópia diária' : 'Primeira cópia';
+    if (label) await this.snapshot(label);
+    if (label || (ver && st.ver !== ver)) await this.ctx.storage.put('snapState', { ver: ver || st.ver || null, day });
+  }
+  async snapshot(label) {
+    const docs = await this.docs(); const meta = await this.meta();
+    const data = JSON.stringify({ meta, docs, at: Date.now() });
+    if (data.length > 1800000) return null;
+    const id = 's' + Date.now().toString(36);
+    const heroes = Object.keys(docs).filter((k) => k.startsWith('heroes/')).length;
+    const idx = (await this.ctx.storage.get('snapIdx')) || [];
+    idx.unshift({ id, at: Date.now(), label: String(label).slice(0, 60), size: data.length, heroes, stage: (docs['party/main'] || {}).stage || 1 });
+    const drop = idx.splice(14);
+    await this.ctx.storage.put('snap:' + id, data);
+    await this.ctx.storage.put('snapIdx', idx);
+    for (const d of drop) await this.ctx.storage.delete('snap:' + d.id);
+    return idx[0];
+  }
+  async snaps(acct) { if (!(await this.isOrg(acct))) throw new Error('Só o organizador vê as cópias de segurança.'); return { snaps: (await this.ctx.storage.get('snapIdx')) || [] }; }
+  async snapNow(acct) { if (!(await this.isOrg(acct))) throw new Error('Só o organizador faz cópias de segurança.'); await this.snapshot('Cópia feita pelo organizador'); return this.snaps(acct); }
+  async snapGet(id, acct) {
+    if (!(await this.isOrg(acct))) throw new Error('Só o organizador baixa as cópias de segurança.');
+    const raw = await this.ctx.storage.get('snap:' + String(id)); if (!raw) throw new Error('Cópia não encontrada.');
+    return { data: raw };
+  }
+  /** Volta a sala para uma cópia (antes, guarda o estado atual como outra cópia, para dar para desfazer). */
+  async restore(room, id, acct) {
+    if (!(await this.isOrg(acct))) throw new Error('Só o organizador restaura cópias de segurança.');
+    const raw = await this.ctx.storage.get('snap:' + String(id)); if (!raw) throw new Error('Cópia não encontrada.');
+    const snap = JSON.parse(raw);
+    await this.snapshot('Antes de restaurar uma cópia');
+    const cur = await this.ctx.storage.list({ prefix: 'd:' });
+    const old = [...cur.keys()]; for (let i = 0; i < old.length; i += 100) await this.ctx.storage.delete(old.slice(i, i + 100));
+    const put = {}; for (const [rel, doc] of Object.entries(snap.docs || {})) put['d:' + rel] = doc;
+    const keys = Object.keys(put); for (let i = 0; i < keys.length; i += 100) { const chunk = {}; keys.slice(i, i + 100).forEach((k) => { chunk[k] = put[k]; }); await this.ctx.storage.put(chunk); }
+    if (snap.meta) await this.ctx.storage.put('meta', Object.assign({}, await this.meta(), { name: snap.meta.name, slots: snap.meta.slots }));
+    await this.bump();
+    return this.out(room);
+  }
   /** Marca uma missão como cumprida apenas se ninguém a cumpriu antes. */
   async claim(room, rel, patch) {
     const doc = await this.ctx.storage.get('d:' + rel);
@@ -255,7 +303,16 @@ async function whoIs(env, token) {
 }
 
 async function call(env, fn, a, token) {
+  const ver = (env.CF_VERSION_METADATA && env.CF_VERSION_METADATA.id) || null;
+  // antes de qualquer gravação numa sala: cópia automática se a versão do app mudou ou se é o 1º acesso do dia
+  if (['api_set', 'api_delete', 'api_claim', 'api_meta'].includes(fn)) {
+    try { const c = fn === 'api_meta' ? code(a[0]) : split(a[0])[0]; await roomOf(env, c).autoSnap(ver); } catch (e) { /* a cópia nunca impede a gravação */ }
+  }
   switch (fn) {
+    case 'api_snaps': { const c = code(a[0]); return roomOf(env, c).snaps(await whoIs(env, token)); }
+    case 'api_snap_now': { const c = code(a[0]); return roomOf(env, c).snapNow(await whoIs(env, token)); }
+    case 'api_snap_get': { const c = code(a[0]); return roomOf(env, c).snapGet(a[1], await whoIs(env, token)); }
+    case 'api_restore': { const c = code(a[0]); return roomOf(env, c).restore(c, a[1], await whoIs(env, token)); }
     case 'api_room': { const c = code(a[0]); return { meta: await roomOf(env, c).meta() }; }
     case 'api_create_room': { const c = code(a[0]); const who = await whoIs(env, token); return roomOf(env, c).create(c, sized(a[1]), sized(a[2]), who); }
     case 'api_get': { const c = code(a[1]); return roomOf(env, c).get(c, a[0]); }

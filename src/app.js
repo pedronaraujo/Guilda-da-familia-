@@ -814,6 +814,12 @@
     if (S.room && S.view !== 'rooms') computeChance();
     const focus = document.activeElement && document.activeElement.id;
     const sel = document.activeElement && document.activeElement.selectionStart;
+    // guarda o que a pessoa digitou e ainda não enviou: a tela se atualiza sozinha (sincronização) e não pode apagar
+    const typed = {};
+    document.querySelectorAll('#page input[id], #page textarea[id], #overlay input[id], #overlay textarea[id]').forEach((el) => {
+      if (['checkbox', 'radio', 'file', 'range', 'hidden', 'password'].includes(el.type)) return;
+      if (el.value !== el.defaultValue) typed[el.id] = { v: el.value, d: el.defaultValue };
+    });
     let html = S.room || S.view === 'rooms' ? topbar() : '';
     if (S.mode === 'local') html += `<div class="banner">Modo local: os dados ficam salvos só neste aparelho.</div>`;
     if (S.stale) html += `<div class="banner ro">Ainda não deu para confirmar os dados mais recentes da guilda. O que aparece aqui pode estar desatualizado.</div>`;
@@ -834,6 +840,7 @@
     const keepScene = S.modal && S.modal.type === 'replay' && ov.dataset.key === S.modal.key && document.getElementById('scene');
     if (!keepScene) { ov.innerHTML = S.modal ? modalHtml() : ''; ov.dataset.key = S.modal && S.modal.key ? S.modal.key : ''; }
     document.getElementById('toast-root').innerHTML = S.toast ? toastHtml() : '';
+    for (const id in typed) { const el = document.getElementById(id); if (el && el.defaultValue === typed[id].d && el.value === el.defaultValue) el.value = typed[id].v; }
     if (focus) { const el = document.getElementById(focus); if (el) { el.focus(); if (sel != null && el.setSelectionRange) try { el.setSelectionRange(sel, sel); } catch (e) { /* ok */ } } }
     if (S.view === 'hero' && S.tab === 'habilidades') drawLinks();
     if (S.modal && S.modal.type === 'replay' && !keepScene) mountReplay();
@@ -1566,6 +1573,9 @@
         return `<section class="card"><div class="card-h"><h3>Feitas hoje</h3><span class="small muted">Reabrir tira o XP de quem cumpriu.</span></div>${rows.length ? `<ul class="approvals">${rows.join('')}</ul>` : '<p class="small muted" style="margin:0">Ninguém concluiu tarefas hoje ainda.</p>'}</section>`; })()}
       <section class="card"><div class="card-h"><h3>Heróis da sala</h3><span class="small muted">${hs.length} de ${roomSlots()} vagas</span></div>
         ${hs.length ? `<ul class="kick-list">${hs.map((h) => `<li><span class="ic">${A.heroSvg(h, { noPet: true, noWeapon: true })}</span><span><b>${esc(h.name)}</b> ${roleTag(h)}<br><span class="small muted">Nível ${h.level} · ${D.CLASSES[h.cls].name}${Store.server ? ` · ${h.owner ? (h.owner === myAcct() ? 'sua conta' : 'conta própria') : 'sem conta'}` : ''}</span></span>${h.id === p.creatorId || h.id === S.me ? '' : `<button class="btn sm ghost danger" data-act="askKick" data-id="${h.id}">Expulsar</button>`}</li>`).join('')}</ul>` : '<p class="small muted" style="margin:0">Ninguém ainda.</p>'}</section>
+      ${Store.server ? `<section class="card"><div class="card-h"><h3>Cópias de segurança</h3><button class="btn sm" data-act="snapNow">Fazer cópia agora</button></div>
+        <p class="small muted" style="margin:0 0 10px">O servidor guarda sozinho uma cópia dos dados da sala antes de cada atualização do app e uma por dia (ficam as 14 mais recentes). Se algo der errado, volte a sala para uma delas.</p>
+        ${S.snaps == null ? '<p class="small muted" style="margin:0">Carregando…</p>' : S.snaps.length ? `<ul class="snaps">${S.snaps.map((x) => `<li><span><b>${esc(fmtSnap(x.at))}</b> · ${esc(x.label)}<br><span class="small muted">${x.heroes} herói${x.heroes === 1 ? '' : 's'} · estágio ${x.stage}</span></span><button class="btn sm ghost" data-act="snapDl" data-id="${x.id}">Baixar</button><button class="btn sm ghost danger" data-act="snapAsk" data-id="${x.id}">Restaurar</button></li>`).join('')}</ul>` : '<p class="small muted" style="margin:0">A primeira cópia é feita na próxima vez que alguém salvar algo na sala.</p>'}</section>` : ''}
       <section class="card"><h3>PIN das configurações</h3><p class="small muted" style="margin:6px 0 10px">${p.pin ? 'As configurações pedem o PIN para abrir, para o criador e para os co-criadores.' : 'Sem PIN, qualquer pessoa que escolher o personagem de um criador abre as configurações.'}</p>
         ${isMainCreator() ? `<div class="row"><button class="btn sm" data-act="setPinAsk">${p.pin ? 'Trocar PIN' : 'Criar PIN'}</button>${p.pin ? '<button class="btn sm ghost" data-act="clearPin">Remover PIN</button>' : ''}</div>` : '<p class="small muted" style="margin:0">Só quem criou a sala troca o PIN. Os co-criadores usam o mesmo PIN.</p>'}</section>
       </div></div>`;
@@ -1695,6 +1705,14 @@
       return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="bl-t" data-stop><div class="eyebrow">Aniversário</div><h3 id="bl-t">Salvar ${fmtBirth(m.v)}?</h3>
         <p class="small" style="margin:6px 0 12px">Depois de salvo, o aniversário <b>não pode ser alterado</b>. Confira o dia, o mês e o ano.</p>
         <div class="row"><button class="btn primary" data-act="bdaySave">Salvar aniversário</button><button class="btn ghost" data-act="closeModal">Corrigir</button></div></div></div>`;
+    }
+    if (m.type === 'restore') {
+      const it = (S.snaps || []).find((x) => x.id === m.id) || {};
+      return `<div class="modal-bg" data-act="closeModal"><form class="modal" role="dialog" aria-modal="true" aria-labelledby="rt-t" data-stop data-form="restore"><div class="eyebrow">Cópia de segurança</div><h3 id="rt-t">Voltar a sala para ${esc(fmtSnap(it.at))}?</h3>
+        <div class="warn-note small">Tudo o que aconteceu na sala depois dessa cópia (tarefas, níveis, compras, batalhas) é desfeito para <b>todos</b>. Antes de restaurar, o estado de agora vira uma cópia nova, então dá para desfazer.</div>
+        <div class="field" style="margin-top:12px"><label for="restore-in">Para confirmar, escreva <b>RESTAURAR</b></label><input type="text" id="restore-in" class="txt" autocomplete="off" autocapitalize="characters" spellcheck="false"></div>
+        ${m.err ? `<p class="small" style="color:var(--bad);margin-top:-6px">${esc(m.err)}</p>` : ''}
+        <div class="row"><button class="btn danger" type="submit" ${m.busy ? 'disabled' : ''}>${m.busy ? 'Restaurando…' : 'Restaurar'}</button><button class="btn ghost" type="button" data-act="closeModal">Cancelar</button></div></form></div>`;
     }
     if (m.type === 'kick') {
       const h = S.heroes[m.heroId]; if (!h) return '';
@@ -2179,7 +2197,17 @@
       chooseHero(h.id); showToast(`<span><b>${esc(h.name)}</b> chegou à guilda com nível ${h.level}!</span>`);
     },
     showLogin() { S.passOpen = !S.passOpen; S.authErr = ''; render(); },
-    settings() { if (!isCreator()) return; S.view = 'settings'; S.diffPreview = null; S.pinErr = ''; render(); scrollTo(0, 0); },
+    settings() { if (!isCreator()) return; S.view = 'settings'; S.diffPreview = null; S.pinErr = ''; render(); scrollTo(0, 0); loadSnaps(); },
+    async snapNow() { if (masterLocked()) return; try { S.snaps = (await serverCall('api_snap_now', S.room)).snaps; showToast('Cópia de segurança criada.'); } catch (e) { showToast(esc(String(e.message || e))); } render(); },
+    async snapDl(el) {
+      if (masterLocked()) return;
+      try {
+        const r = await serverCall('api_snap_get', S.room, el.dataset.id); const it = (S.snaps || []).find((x) => x.id === el.dataset.id) || {};
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([r.data], { type: 'application/json' }));
+        a.download = `guilda-${S.room}-${new Date(it.at || Date.now()).toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`; document.body.appendChild(a); a.click(); a.remove();
+      } catch (e) { showToast(esc(String(e.message || e))); }
+    },
+    snapAsk(el) { if (masterLocked()) return; S.modal = { type: 'restore', id: el.dataset.id }; render(); setTimeout(() => { const i = document.getElementById('restore-in'); if (i) i.focus(); }, 30); },
     choreWho(el) { S.choreAssign = el.value; render(); },
     delChore(el) { if (masterLocked()) return; Store.delDoc('chores/' + el.dataset.id); render(); },
     bdaySave() { const m = S.modal; const h = hero(); S.modal = null; if (h && m && !h.birth && /^\d{4}-\d{2}-\d{2}$/.test(m.v)) { h.birth = m.v; saveCur(h); showToast('Aniversário salvo.'); } render(); },
@@ -2477,6 +2505,8 @@
     post('new', `${S.me && S.heroes[S.me] ? S.heroes[S.me].name : 'Alguém'} fixou "${title}" no quadro da guilda`);
   }
   document.addEventListener('submit', (ev) => {
+    // o que foi enviado deixa de ser "digitado e não enviado": a tela pode limpar o formulário
+    ev.target.querySelectorAll && ev.target.querySelectorAll('input, textarea').forEach((el) => { el.defaultValue = el.value; });
     const form = ev.target.dataset.form; if (!form) return; ev.preventDefault();
     if (form === 'pin') return submitPin();
     if (form === 'pinGate') { const v = (document.getElementById('pin-in').value || '').trim(); if (S.party && v === S.party.pin) { S.masterOk = true; S.pinErr = ''; } else S.pinErr = 'PIN incorreto.'; render(); return; }
@@ -2501,6 +2531,14 @@
       const before = (S.roomMeta && S.roomMeta.name) || '';
       Store.setMeta({ name, slots }).then(() => { Acct.room(); if (name !== before) post('cfg', `A sala agora se chama "${name}"`); showToast(`<span>Sala <b>${esc(name)}</b> · ${slots} vaga${slots === 1 ? '' : 's'}.</span>`); render(); })
         .catch((e) => showToast(esc(String(e.message || e))));
+      return;
+    }
+    if (form === 'restore') {
+      const m = S.modal; if (!m || m.type !== 'restore' || masterLocked()) return;
+      if ((document.getElementById('restore-in').value || '').trim() !== 'RESTAURAR') { m.err = 'Escreva RESTAURAR (em letras maiúsculas) para confirmar.'; render(); return; }
+      m.busy = true; render();
+      serverCall('api_restore', S.room, m.id).then((res) => { Store.rev = -1; Store.takeGas(res); S.modal = null; post('cfg', 'A sala foi restaurada para uma cópia de segurança'); showToast('Sala restaurada. Os dados de antes também viraram uma cópia, caso queira desfazer.'); loadSnaps(); render(); })
+        .catch((e) => { m.busy = false; m.err = String(e.message || e); render(); });
       return;
     }
     if (form === 'kick') {
@@ -2555,6 +2593,8 @@
     const nt = h.tasks[h.tasks.length - 1]; if (!visibleToday(nt)) { const n = nt.repeat ? nextOn(nt, dueDay(nt)) : dueDay(nt); showToast(`<span>Tarefa criada. Aparece ${n ? `${D.WEEKDAYS[dowOf(n)].toLowerCase()}, ${fmtDay(n)}` : 'nos dias marcados'}.</span>`); }
     inp.value = ''; clearInput(inp.id); S.newDue = ''; saveCur(h); document.getElementById('task-title').focus();
   });
+  const fmtSnap = (t) => { if (!t) return ''; const d = new Date(t); return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' às ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); };
+  async function loadSnaps() { if (!Store.server || !S.room) return; S.snaps = null; try { S.snaps = (await serverCall('api_snaps', S.room)).snaps || []; } catch (e) { S.snaps = []; } if (S.view === 'settings') render(); }
   function kickHero(id) {
     const h = S.heroes[id]; if (!h) return;
     const p = clone(S.party || newParty());

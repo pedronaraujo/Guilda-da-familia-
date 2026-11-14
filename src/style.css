@@ -770,3 +770,6 @@ s.small { opacity: .6; }
 .cls-pv .fig svg { width: 100%; height: 100%; }
 .classes.compact { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); max-height: 40vh; overflow: auto; }
 .classes.compact .cls { padding: 8px 10px; }
+.snaps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 340px; overflow: auto; }
+.snaps li { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,.03); }
+.snaps li > span { flex: 1; }

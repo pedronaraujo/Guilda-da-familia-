@@ -714,6 +714,16 @@ s.small { opacity: .6; }
 .del.undo { color: var(--gold-2); font-size: 17px; }
 .del.undo:hover { background: #3a2a10; }
 .when .date-in { min-width: 150px; }
+/* convite por link */
+.invite-hi { margin: 8px auto 12px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--gold, #e8b84a) 55%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--gold, #e8b84a) 12%, transparent); max-width: 560px; }
+.invite-link { display: flex; gap: 8px; }
+.invite-link input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0,0,0,.25); color: inherit; font: inherit; font-size: 14px; }
+.modal.invite a.btn { text-decoration: none; }
+/* limite diário de XP e destaque do dia */
+.num-in.wide { width: 110px !important; }
+.xpcfg .row { gap: 10px; flex-wrap: wrap; align-items: center; }
+.cap-card.full .bar i { background: var(--bad, #e06464); }
+.mvp-day { margin: 10px 0 0; padding: 8px 10px; border-radius: 10px; background: rgba(232, 184, 74, .08); border: 1px dashed rgba(232, 184, 74, .35); }
 
 </style>
 </head>
@@ -2861,6 +2871,36 @@ s.small { opacity: .6; }
     if (dowOf(t) === 0 && h.log[addDays(t, -1)] && h.log[addDays(t, -1)].t) h.stats.weekend = true;
   }
   function grantXp(h, amount) { ensureHero(h); const ups = addXp(h, amount); logDay(h, 'x', amount); return ups; }
+  /* ----- Limite diário de XP das tarefas e destaque do dia ----- */
+  // tx = XP de tarefas que entrou hoje (com limite) · tr = XP que as tarefas valiam (sem limite, usado no destaque)
+  const xpCap = () => { const v = Math.round(Number(S.party && S.party.xpCap) || 0); return v > 0 ? v : 0; };
+  const capLeft = (h) => { const c = xpCap(); if (!c || !h) return Infinity; const lg = (h.log || {})[today()] || {}; return Math.max(0, c - (lg.tx || 0)); };
+  const taskRawOf = (lg) => (lg ? (lg.tr != null ? lg.tr : lg.x || 0) : 0);
+  const mvpGoldFor = (st, p) => { const v = Math.round(Number((p || S.party || {}).mvpGold) || 0); return v > 0 ? v : Math.max(10, Math.round(E.goldReward(st || 1) * 0.5)); };
+  function gotToday(h) { const t = today(); if (!h.got || h.got.day !== t) h.got = { day: t, m: {} }; return h.got.m; }
+  // dá o XP de uma tarefa respeitando o limite do dia; guarda quanto entrou para o "desfazer" devolver certo
+  function grantTaskXp(h, id, raw) {
+    ensureHero(h); raw = Math.max(0, Math.round(raw || 0));
+    const g = Math.min(raw, capLeft(h));
+    logDay(h, 'tx', g); logDay(h, 'tr', raw); gotToday(h)[id] = { g, r: raw };
+    const ups = g ? grantXp(h, g) : 0;
+    return { g, raw, ups, capped: g < raw };
+  }
+  function takeTaskXp(h, id, fallback) {
+    ensureHero(h); const m = gotToday(h); const e = m[id];
+    const g = e ? e.g : Math.max(0, Math.round(fallback || 0)); const r = e ? e.r : g;
+    removeXp(h, g); logDay(h, 'tx', -g); logDay(h, 'tr', -r);
+    const lg = h.log[today()]; if (lg) { if (lg.tx < 0) lg.tx = 0; if (lg.tr < 0) lg.tr = 0; }
+    delete m[id]; return g;
+  }
+  const capNote = (r) => (r.capped ? ` · <span class="muted">limite diário${r.g ? `: só +${r.g} XP entrou` : ' atingido, sem XP'}</span>` : '');
+  // quem mais somou XP em tarefas num dia (empates dividem o título)
+  function dayLeaders(hs, day) {
+    const rows = hs.map((h) => ({ h, r: taskRawOf((h.log || {})[day]) })).filter((x) => x.r > 0);
+    if (!rows.length) return null;
+    const top = Math.max(...rows.map((x) => x.r));
+    return { xp: top, heroes: rows.filter((x) => x.r === top).map((x) => x.h) };
+  }
   /* ----- Desfazer uma tarefa concluída hoje ----- */
   // tira o XP sem nunca tirar um nível já conquistado: o que faltar vira "dívida" paga pelas próximas tarefas
   function removeXp(h, amount) {
@@ -2918,9 +2958,10 @@ s.small { opacity: .6; }
       const notes = []; let ups = 0;
       for (const it of claimed) {
         if (it.kind === 'approve') {
-          if (it.ref && it.ref.type === 'task') { const t = h.tasks.find((x) => x.id === it.ref.id); if (t) { t.done = today(); t.gain = it.xp; t.pending = null; if (t.wasPunctual) h.stats.punctual = (h.stats.punctual || 0) + 1; } }
+          const rx = grantTaskXp(h, (it.ref && it.ref.id) || it.id, it.xp || 0); ups += rx.ups;
+          if (it.ref && it.ref.type === 'task') { const t = h.tasks.find((x) => x.id === it.ref.id); if (t) { t.done = today(); t.gain = rx.g; t.pending = null; if (t.wasPunctual) h.stats.punctual = (h.stats.punctual || 0) + 1; } }
           if (it.ref && it.ref.type === 'board') h.stats.board = (h.stats.board || 0) + 1;
-          ups += grantXp(h, it.xp || 0); notes.push(`Aprovada: <b>${esc(it.title || 'tarefa')}</b> +${it.xp} XP`);
+          notes.push(`Aprovada: <b>${esc(it.title || 'tarefa')}</b> +${rx.g} XP${capNote(rx)}`);
         } else if (it.kind === 'reject') {
           if (it.ref && it.ref.type === 'task') { const t = h.tasks.find((x) => x.id === it.ref.id); if (t) { t.pending = null; t.pendXp = 0; } }
           h.stats.done = Math.max(0, (h.stats.done || 0) - 1); notes.push(`Não aprovada: <b>${esc(it.title || 'tarefa')}</b>`);
@@ -3096,6 +3137,12 @@ s.small { opacity: .6; }
       const gold = res.win ? Math.round(E.goldReward(st) * (1 + gm)) : 0;
       p.earned = p.earned || {};
       if (res.win) { for (const h of hs) p.earned[h.id] = (p.earned[h.id] || 0) + gold; p.stage = st + 1; }
+      // destaque do dia: quem mais somou XP em tarefas ganha moedas, com vitória ou derrota
+      let mvp = null;
+      if (!force) {
+        const L = dayLeaders(hs, battleDay);
+        if (L) { const g = mvpGoldFor(st, p); for (const h of L.heroes) p.earned[h.id] = (p.earned[h.id] || 0) + g; mvp = { ids: L.heroes.map((h) => h.id), names: L.heroes.map((h) => h.name), xp: L.xp, gold: g }; }
+      }
       // bestiário e saque
       const foes = E.buildEnemies(st, hs.length, mul); p.bestiary = p.bestiary || {};
       for (const f of foes) { const b = p.bestiary[f.sid] || { s: 0, k: 0, t: 0 }; b.s++; if (res.win) b.k += f.count || 1; b.t = Math.max(b.t, f.tier || 0); p.bestiary[f.sid] = b; }
@@ -3107,8 +3154,9 @@ s.small { opacity: .6; }
       }
       post('battle', `${res.win ? 'Vitória' : 'Derrota'} no estágio ${st} (${E.regionOf(st).name})${res.win ? `: +${gold} de ouro para cada herói` : ''}`);
       const missed = Math.max(0, daysBetween(p.lastBattleDay, t) - 1);
-      p.last = { id: uidGen(), day: battleDay, stage: st, win: res.win, gold, rounds: res.rounds, seed, mul, roster, missed: force ? 0 : missed, test: !!force };
-      p.history = [{ day: battleDay, stage: st, win: res.win, gold, test: !!force }].concat(p.history || []).slice(0, 10);
+      if (mvp) post('mvp', `Destaque do dia: ${mvp.names.join(' e ')} (${mvp.xp} XP em tarefas) ganhou +${mvp.gold} moedas`);
+      p.last = { id: uidGen(), day: battleDay, stage: st, win: res.win, gold, rounds: res.rounds, seed, mul, roster, missed: force ? 0 : missed, test: !!force, mvp };
+      p.history = [{ day: battleDay, stage: st, win: res.win, gold, test: !!force, mvp: mvp ? mvp.names.join(' e ') : null }].concat(p.history || []).slice(0, 10);
       // batalha extra do evento (noite de domingo)
       if (!force && evB && evB.extra && dowOf(battleDay) === 0 && !(p.eventBattle && p.eventBattle.key === evB.key)) {
         const eseed = E.hashStr('evt:' + evB.key + ':' + S.room);
@@ -3254,8 +3302,15 @@ s.small { opacity: .6; }
     return `<header class="topbar"><div class="brand">${back}<h1>${esc(inRoom ? title : 'Guilda da Família')}</h1></div>
       ${inRoom ? `<div class="chips">${Acct.on() && S.acct.rooms.length > 1 ? `<label class="chip room-sw"><span class="sr-only">Trocar de sala</span><select id="room-switch" aria-label="Trocar de sala">${S.acct.rooms.map((r) => `<option value="${esc(r.code)}" ${r.code === S.room ? 'selected' : ''}>${esc(r.name || r.code)} · ${esc(r.code)}</option>`).join('')}</select></label>` : `<span class="chip">Sala <b class="num">${esc(S.room)}</b></span>`}${S.party && S.view !== 'select' ? `<span class="chip">Estágio <b class="num">${stage()}</b> · ${esc(E.regionOf(stage()).name)}</span><span class="chip warn">Batalha à meia-noite · <b class="num">${countdown()}</b></span>` : ''}</div>` : ''}</header>
       ${inRoom ? `<div class="sessbar">${me ? `<span class="who">${A.heroSvg(me, { noPet: true, noWeapon: true })}<span>Jogando como <b>${esc(me.name)}</b> ${roleTag(me)}</span></span>` : '<span class="muted">Escolha seu personagem</span>'}
-        <span class="spacer"></span><button class="btn sm ghost" data-act="toggleSound" aria-pressed="${Sound.on}">${Sound.on ? 'Som ligado' : 'Som desligado'}</button>${me ? '<button class="btn sm ghost" data-act="tutorial">Tutorial</button>' : ''}${isCreator() && S.view !== 'settings' ? `<button class="btn sm" data-act="settings">Configurações${adminBadge() ? `<span class="dot">${adminBadge()}</span>` : ''}</button>` : ''}${me ? `<button class="btn sm ghost" data-act="switchHero">Trocar personagem</button>` : ''}<button class="btn sm ghost" data-act="leaveRoom">Sair da sala</button></div>` : ''}`;
+        <span class="spacer"></span>${canInvite() ? '<button class="btn sm" data-act="invite">Convidar</button>' : ''}<button class="btn sm ghost" data-act="toggleSound" aria-pressed="${Sound.on}">${Sound.on ? 'Som ligado' : 'Som desligado'}</button>${me ? '<button class="btn sm ghost" data-act="tutorial">Tutorial</button>' : ''}${isCreator() && S.view !== 'settings' ? `<button class="btn sm" data-act="settings">Configurações${adminBadge() ? `<span class="dot">${adminBadge()}</span>` : ''}</button>` : ''}${me ? `<button class="btn sm ghost" data-act="switchHero">Trocar personagem</button>` : ''}<button class="btn sm ghost" data-act="leaveRoom">Sair da sala</button></div>` : ''}`;
   }
+  /* ----- Convite por link ----- */
+  const canInvite = () => !!Store.server && /^https?:$/.test(location.protocol) && !!S.room;
+  const inviteUrl = () => `${location.origin}${location.pathname}?sala=${encodeURIComponent(S.room)}`;
+  function inviteParam() {
+    try { const q = new URLSearchParams(location.search).get('sala') || (location.hash.match(/sala=([A-Za-z0-9]{6})/) || [])[1]; const c = q ? normCode(q) : ''; return c.length === 6 ? c : null; } catch (e) { return null; }
+  }
+  const inviteText = () => `Venha para a nossa guilda "${(S.roomMeta && S.roomMeta.name) || 'Guilda da Família'}" e transforme as tarefas em aventura! Entre por este link:`;
   const adminBadge = () => pendingItems().length + (typeof openRequests === 'function' ? openRequests().length : 0);
   /* ----- Entrada: código da sala ----- */
   function roomsView() {
@@ -3293,9 +3348,10 @@ s.small { opacity: .6; }
   function selectView() {
     const hs = heroList();
     const cards = hs.map((h) => { const c = D.CLASSES[h.cls]; return `<button class="pickme" data-act="pickMe" data-id="${h.id}"><span class="lv num">Nv ${h.level}</span><div class="fig"><div class="idle">${A.heroSvg(h)}</div></div><div class="nm">${esc(h.name)}</div><div class="cl"><span style="color:${c.color}">${c.name}</span> · ${ancOf(h).name}</div>${roleTag(h)}</button>`; }).join('');
-    return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Sala ${esc(S.room)}</div><h2>Quem está jogando?</h2><p class="muted">Escolha o seu personagem. Você só mexe nas tarefas, habilidades e itens dele.${S.party && !S.party.creatorId ? ' O primeiro herói criado vira o criador da sala.' : ''}</p></div>
+    const invited = S.invited === S.room;
+    return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Sala ${esc(S.room)}</div>${invited ? `<div class="invite-hi">Você foi convidado para <b>${esc((S.roomMeta && S.roomMeta.name) || 'a guilda')}</b>! ${hs.length < D.MAX_HEROES ? 'Crie o seu herói ou, se já tem um aqui, toque nele.' : 'A guilda já tem 5 heróis. Se um deles é seu, toque nele.'}</div>` : ''}<h2>Quem está jogando?</h2><p class="muted">Escolha o seu personagem. Você só mexe nas tarefas, habilidades e itens dele.${S.party && !S.party.creatorId ? ' O primeiro herói criado vira o criador da sala.' : ''}</p></div>
       <div class="picklist">${cards}${hs.length < D.MAX_HEROES ? `<button class="pickme new" data-act="create" ${S.readOnly ? 'disabled' : ''}><div class="fig"><span class="plus">+</span></div><div class="nm">Criar herói</div><div class="cl">Vaga ${hs.length + 1} de ${D.MAX_HEROES}</div></button>` : ''}</div>
-      <p class="small muted" style="margin-top:16px">Passe o código <b>${esc(S.room)}</b> para a família entrar na mesma sala.</p></section>`;
+      <p class="small muted" style="margin-top:16px">${canInvite() ? `<button class="btn sm" data-act="invite">Convidar com link</button> ou passe o código <b>${esc(S.room)}</b>.` : `Passe o código <b>${esc(S.room)}</b> para a família entrar na mesma sala.`}</p></section>`;
   }
 
   function homeView() {
@@ -3327,7 +3383,8 @@ s.small { opacity: .6; }
     const hs = heroList().map((h) => ({ h, x: weekXp(h), t: weekTasks(h) })).sort((a, b) => b.x - a.x || b.t - a.t);
     const ws = weekStart(today());
     return `<section class="card"><div class="card-h"><div><div class="eyebrow">Ranking da semana</div><h3>Quem mais ajudou</h3></div><span class="small muted">Desde ${D.WEEKDAYS[1].toLowerCase()}., ${fmtDay(ws)}</span></div>
-      ${hs.length ? `<ol class="rank">${hs.map((r, i) => `<li class="${i < 3 && r.x ? 'top' + (i + 1) : ''}"><span class="pos num">${i + 1}</span><span class="ic">${A.heroSvg(r.h, { noPet: true, noWeapon: true })}</span><span class="nm">${esc(r.h.name)}${r.h.id === S.me ? ' <span class="small muted">(você)</span>' : ''}</span><span class="small muted num">${r.t} tarefa${r.t === 1 ? '' : 's'}</span><b class="num">${r.x} XP</b></li>`).join('')}</ol>` : '<p class="muted">Sem heróis ainda.</p>'}</section>`;
+      ${hs.length ? `<ol class="rank">${hs.map((r, i) => `<li class="${i < 3 && r.x ? 'top' + (i + 1) : ''}"><span class="pos num">${i + 1}</span><span class="ic">${A.heroSvg(r.h, { noPet: true, noWeapon: true })}</span><span class="nm">${esc(r.h.name)}${r.h.id === S.me ? ' <span class="small muted">(você)</span>' : ''}</span><span class="small muted num">${r.t} tarefa${r.t === 1 ? '' : 's'}</span><b class="num">${r.x} XP</b></li>`).join('')}</ol>` : '<p class="muted">Sem heróis ainda.</p>'}
+      ${hs.length ? (() => { const L = dayLeaders(heroList(), today()); const g = mvpGoldFor(stage()); return `<p class="small mvp-day">${L ? `⭐ Destaque de hoje até agora: <b>${esc(L.heroes.map((h) => h.name).join(' e '))}</b> · ${L.xp} XP em tarefas. À meia-noite ganha <span class="gold num">+${g}</span> <span class="coin"></span>, vencendo ou perdendo a batalha.` : `⭐ Quem somar mais XP em tarefas hoje ganha <span class="gold num">+${g}</span> <span class="coin"></span> à meia-noite, vencendo ou perdendo a batalha.`}</p>`; })() : ''}</section>`;
   }
   function activityCard() {
     const list = activityList().slice(0, 12);
@@ -3375,7 +3432,7 @@ s.small { opacity: .6; }
     const by = t.done ? (S.heroes[t.doneBy] ? S.heroes[t.doneBy].name : t.doneByName || 'alguém') : '';
     const parts = t.parts || []; const mine = S.me && parts.includes(S.me);
     const share = t.duo ? Math.round(x.total * D.DUO_SHARE) : x.total;
-    const xpTxt = t.done ? `+${t.gain || x.base} XP` : t.duo ? `+${share} XP cada` : x.total !== x.base ? `<s>${x.base}</s>+${x.total} XP` : `+${x.total} XP`;
+    const xpTxt = t.done ? `+${t.gain != null ? t.gain : x.base} XP` : capShow(share) || (t.duo ? `+${share} XP cada` : x.total !== x.base ? `<s>${x.base}</s>+${x.total} XP` : `+${x.total} XP`);
     const who = whoOf(t); const notMine = !!S.me && !canDoBoard(t, S.me); const future = boardFuture(t);
     const blocked = S.readOnly || !!t.done || mine || notMine || future;
     const meta = taskMeta(Object.assign({}, t, { pending: null }), x)
@@ -3445,7 +3502,7 @@ s.small { opacity: .6; }
     const p = S.party; const last = p && p.last;
     const hist = (p && p.history) || [];
     return `<section class="card"><div class="card-h"><div><div class="eyebrow">Diário de batalhas</div><h3>${last ? (last.win ? 'Última batalha: vitória' : 'Última batalha: derrota') : 'Nenhuma batalha ainda'}</h3></div>${last ? `<button class="btn sm" data-act="replay">Rever</button>` : ''}</div>
-      ${last ? `<p class="muted small" style="margin-top:0">Estágio ${last.stage} · ${fmtDay(last.day)}${last.test ? ' · teste' : ''} · ${last.rounds} rodadas${last.win ? ` · +${last.gold} de ouro para cada herói` : ''}</p>` : `<p class="muted">A primeira batalha acontece na virada do dia. Até lá, cumpram tarefas para ganhar experiência.</p>`}
+      ${last ? `<p class="muted small" style="margin-top:0">Estágio ${last.stage} · ${fmtDay(last.day)}${last.test ? ' · teste' : ''} · ${last.rounds} rodadas${last.win ? ` · +${last.gold} de ouro para cada herói` : ''}</p>${last.mvp ? `<p class="small mvp-day">⭐ Destaque do dia: <b>${esc(last.mvp.names.join(' e '))}</b> · ${last.mvp.xp} XP em tarefas · <span class="gold num">+${last.mvp.gold}</span> <span class="coin"></span></p>` : ''}` : `<p class="muted">A primeira batalha acontece na virada do dia. Até lá, cumpram tarefas para ganhar experiência.</p>`}
       ${hist.length ? `<ul class="hist">${hist.map((x) => `<li><span>${fmtDay(x.day)} · Estágio ${x.stage}${x.test ? ' (teste)' : ''}</span><span class="tag ${x.win ? 'win' : 'loss'}">${x.win ? 'Vitória' : 'Derrota'}</span></li>`).join('')}</ul>` : ''}</section>`;
   }
 
@@ -3572,9 +3629,11 @@ s.small { opacity: .6; }
     if (dueDay(t) < today() && !t.done && !t.pending) bits.push(`<span>desde ${fmtDay(dueDay(t))}</span>`);
     return bits.join('');
   }
+  // com o limite diário perto do fim, mostra quanto XP a tarefa ainda dá de verdade
+  function capShow(total) { const left = capLeft(S.me && S.heroes[S.me]); if (left >= total) return ''; return `<span title="Limite diário de XP: ${xpCap()}"><s>${total}</s> +${left} XP</span>`; }
   function taskRow(t) {
     const d = D.DIFF[t.diff]; const x = xpFor(t);
-    const xpTxt = t.done ? `+${t.gain || x.base} XP` : t.pending ? `${t.pendXp} XP` : x.total !== x.base ? `<s>${x.base}</s>+${x.total} XP` : `+${x.total} XP`;
+    const xpTxt = t.done ? `+${t.gain != null ? t.gain : x.base} XP` : t.pending ? `${t.pendXp} XP` : capShow(x.total) || (x.total !== x.base ? `<s>${x.base}</s>+${x.total} XP` : `+${x.total} XP`);
     return `<li class="task${t.done ? ' done' : ''}${t.pending ? ' pending' : ''}${x.carried ? ' carried' : ''}" style="--c:${d.color}">
       <button class="done-btn" data-act="${t.done || t.pending ? 'noop' : 'done'}" data-id="${t.id}" aria-label="${t.done ? 'Concluída' : 'Concluir ' + esc(t.title)}" ${S.readOnly || t.done || t.pending ? 'disabled' : ''}>${t.done ? '✓' : t.pending ? '…' : ''}</button>
       <div><div class="t">${esc(t.title)}</div><div class="sub">${taskMeta(t, x)}</div></div>
@@ -3614,6 +3673,7 @@ s.small { opacity: .6; }
       ${done.length ? `<div class="section-t"><h3>Feitas hoje</h3><span class="small muted num">+${xpToday} XP</span></div><ul class="tasks">${done.map(taskRow).join('')}</ul>` : ''}
       ${later.length ? `<details class="later" ${S.showLater ? 'open' : ''}><summary data-act="toggleLater">Outros dias (${later.length})</summary><ul class="tasks">${later.map(taskRow).join('')}</ul></details>` : ''}
     </div><div>
+      ${xpCap() ? (() => { const c = xpCap(); const used = Math.min(c, ((h.log || {})[t] || {}).tx || 0); return `<section class="card cap-card${used >= c ? ' full' : ''}"><div class="eyebrow">Limite diário de XP</div><div class="row" style="justify-content:space-between"><b class="num">${used} / ${c} XP</b><span class="small muted">${used >= c ? 'Atingido: as tarefas de hoje não dão mais XP' : `Faltam ${c - used} XP hoje`}</span></div><div class="bar" style="margin-top:6px"><i style="width:${Math.round((used / c) * 100)}%"></i></div><p class="small muted" style="margin:6px 0 0">Mesmo depois do limite, as tarefas contam para o destaque do dia.</p></section>`; })() : ''}
       <section class="card"><div class="eyebrow">Sua sequência</div><div class="streak-big"><span class="num">${sn}</span> dia${sn === 1 ? '' : 's'} seguido${sn === 1 ? '' : 's'}</div>
         <p class="small muted" style="margin:4px 0 0">${sn ? `Bônus de sequência hoje: +${Math.round(streakBonusNext(h) * 100)}% de XP. Cumpra ao menos uma tarefa por dia para manter.` : 'Cumpra uma tarefa hoje para começar uma sequência. Cada dia seguido dá +2% de XP (até +20%).'}</p>
         ${h.streak.best ? `<p class="small" style="margin:6px 0 0">Recorde: <b>${h.streak.best}</b> dias</p>` : ''}</section>
@@ -3778,6 +3838,13 @@ s.small { opacity: .6; }
         <p class="small" style="margin:10px 0 0"><span id="diff-blurb">${esc(lv.blurb)}</span> Chance de vitória esta noite com essa dificuldade: <b id="diff-chance" class="num">${hs.length ? Math.round(E.winChance(hs, stage(), 40, mul) * 100) + '%' : '–'}</b>.</p>
         <p class="small muted" style="margin:6px 0 0">Multiplica a vida e o poder de todos os inimigos. Vale a partir da próxima batalha.</p></section>
       ${approvalSection(hs)}
+      <section class="card"><div class="card-h"><h3>Experiência por dia</h3>${xpCap() ? `<span class="chip">Limite: <b class="num">${xpCap()} XP</b></span>` : '<span class="chip">Sem limite</span>'}</div>
+        <form data-form="xpcfg" class="xpcfg">
+          <div class="field"><label for="cap-in">Limite diário de XP por personagem</label><div class="row"><input type="number" id="cap-in" class="time-in num-in wide" min="0" max="5000" step="10" placeholder="Sem limite" value="${xpCap() || ''}"><span class="small muted">XP das tarefas. Deixe vazio ou 0 para não ter limite.</span></div></div>
+          <p class="small muted" style="margin:-4px 0 10px">Depois do limite, o personagem continua cumprindo tarefas, mas não ganha mais experiência naquele dia. Elogios, baús e prêmios de evento não contam no limite.</p>
+          <div class="field"><label for="mvp-in">Bônus do destaque do dia (moedas)</label><div class="row"><input type="number" id="mvp-in" class="time-in num-in wide" min="0" max="5000" step="5" placeholder="Automático" value="${Math.round(Number(p.mvpGold) || 0) || ''}"><span class="small muted">Vazio = automático (no estágio atual: ${mvpGoldFor(stage(), {})} moedas, metade do prêmio da vitória).</span></div></div>
+          <p class="small muted" style="margin:-4px 0 10px">Quem somar mais XP em tarefas no dia ganha esse bônus à meia-noite, vencendo ou perdendo a batalha. Conta o XP que as tarefas valem, mesmo acima do limite. Empate: todos ganham.</p>
+          <button class="btn primary" type="submit">Salvar</button></form></section>
       <section class="card"><div class="card-h"><h3>Tarefas obrigatórias</h3><span class="small muted">Aparecem todo dia para quem você escolher. Só você pode apagar.</span></div>
         <form class="addtask" data-form="chore"><input type="text" id="chore-title" value="${esc((S.inputs || {})["chore-title"] || "")}" maxlength="80" placeholder="Ex.: Escovar os dentes, arrumar a mochila" autocomplete="off">
           <div class="row"><div class="seg" role="group" aria-label="Dificuldade">${diffButtons()}</div></div>
@@ -3797,7 +3864,7 @@ s.small { opacity: .6; }
       <section class="card"><h3>PIN das configurações</h3><p class="small muted" style="margin:6px 0 10px">${p.pin ? 'As configurações pedem o PIN para abrir, para o criador e para os co-criadores.' : 'Sem PIN, qualquer pessoa que escolher o personagem de um criador abre as configurações.'}</p>
         ${isMainCreator() ? `<div class="row"><button class="btn sm" data-act="setPinAsk">${p.pin ? 'Trocar PIN' : 'Criar PIN'}</button>${p.pin ? '<button class="btn sm ghost" data-act="clearPin">Remover PIN</button>' : ''}</div>` : '<p class="small muted" style="margin:0">Só quem criou a sala troca o PIN. Os co-criadores usam o mesmo PIN.</p>'}</section>
       <section class="card"><h3>Sala</h3><p class="small" style="margin:6px 0 10px">Código para a família entrar: <b class="code-big">${esc(S.room)}</b></p>
-        <div class="row"><button class="btn sm" data-act="copyCode">Copiar código</button>${hs.length ? '<button class="btn sm ghost" data-act="forceBattle">Prévia da batalha</button>' : ''}</div>
+        <div class="row">${canInvite() ? '<button class="btn sm primary" data-act="invite">Link de convite</button>' : ''}<button class="btn sm" data-act="copyCode">Copiar código</button>${hs.length ? '<button class="btn sm ghost" data-act="forceBattle">Prévia da batalha</button>' : ''}</div>
         <p class="small muted" style="margin:8px 0 0">A prévia mostra como a batalha desta noite terminaria se fosse agora. Não dá recompensa nem muda o estágio.</p></section>
       </div></div>`;
   }
@@ -3883,6 +3950,14 @@ s.small { opacity: .6; }
       return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="pk-t" data-stop><div class="eyebrow">Missão da guilda</div><h3 id="pk-t">Quem cumpriu "${esc(t.title)}"?</h3>
         <div class="picker">${heroList().filter((h) => canDoBoard(t, h.id)).map((h) => `<button class="pick" data-act="doneBoardAs" data-id="${h.id}"><span class="ic">${A.heroSvg(h, { noPet: true })}</span><span>${esc(h.name)}</span></button>`).join('')}</div>
         <div class="row"><button class="btn ghost" data-act="closeModal">Cancelar</button></div></div></div>`;
+    }
+    if (m.type === 'invite') {
+      const url = inviteUrl(); const msg = inviteText() + ' ' + url;
+      return `<div class="modal-bg" data-act="closeModal"><div class="modal invite" role="dialog" aria-modal="true" aria-labelledby="inv-t" data-stop><div class="eyebrow">Sala ${esc(S.room)}</div><h3 id="inv-t">Convidar para ${esc((S.roomMeta && S.roomMeta.name) || 'a guilda')}</h3>
+        <p class="small muted" style="margin:6px 0 12px">Quem abrir o link entra direto na sala e cria o seu herói. Sem digitar código.</p>
+        <div class="invite-link"><input type="text" id="invite-url" readonly value="${esc(url)}" aria-label="Link de convite"><button class="btn primary" data-act="copyInvite">${m.copied ? 'Copiado!' : 'Copiar'}</button></div>
+        <div class="row" style="margin-top:12px">${navigator.share ? '<button class="btn" data-act="shareInvite">Compartilhar…</button>' : ''}<a class="btn" href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">Enviar no WhatsApp</a><span class="spacer"></span><button class="btn ghost" data-act="closeModal">Fechar</button></div>
+        <p class="small muted" style="margin:12px 0 0">A guilda tem ${heroList().length} de ${D.MAX_HEROES} vagas ocupadas. Código da sala: <b class="num">${esc(S.room)}</b></p></div></div>`;
     }
     if (m.type === 'pin') {
       return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="pin-t" data-stop><h3 id="pin-t">${m.mode === 'set' ? 'Criar PIN do mestre' : 'PIN do mestre'}</h3>
@@ -4234,6 +4309,7 @@ s.small { opacity: .6; }
     r.innerHTML = b.win
       ? `<div class="res win"><h2>Vitória!</h2><p>${b.preview ? 'Se a batalha fosse agora, o grupo venceria. Nada mudou: a batalha de verdade é à meia-noite.' : m.practice ? 'No treino, o grupo venceu. Esta noite pode ser diferente: a sorte também luta.' : b.event ? `Cada herói ganhou <b class="gold">${b.gold}</b> <span class="coin"></span> de ouro e uma relíquia ${D.RARITY[b.special.relic].name.toLowerCase()}.` : `Cada herói ganhou <b class="gold">${b.gold}</b> <span class="coin"></span> de ouro. O grupo avança para o estágio ${b.stage + 1}.`}</p></div>`
       : `<div class="res loss"><h2>Derrota</h2><p>${b.preview ? 'Se a batalha fosse agora, o grupo perderia. Ainda dá tempo de cumprir tarefas antes da meia-noite.' : b.event ? 'O desafio especial venceu desta vez. Nada foi perdido.' : m.practice ? 'No treino, o grupo perdeu. Cumpram mais tarefas hoje para chegar mais fortes à meia-noite.' : 'O desafio continua o mesmo. Cumpram tarefas, subam de nível e tentem de novo à meia-noite.'}</p></div>`;
+    if (b.mvp && !b.preview && !m.practice && !b.event) r.querySelector('.res').insertAdjacentHTML('beforeend', `<p class="mvp-line">⭐ Destaque do dia: <b>${esc(b.mvp.names.join(' e '))}</b> (${b.mvp.xp} XP em tarefas) ganhou <b class="gold">+${b.mvp.gold}</b> <span class="coin"></span>${b.mvp.ids.includes(S.me) ? ' · é você!' : ''}</p>`);
     if (!b.preview && !m.practice) { try { const c = battleContrib(b); const top = c.list[0]; if (top && top.score > 0) r.querySelector('.res').insertAdjacentHTML('beforeend', `<p class="mvp-line">👑 Destaque da batalha: <b>${esc(top.name)}</b> · ${fmtN(top.score)} pontos</p>`); } catch (e) { /* sem destaque */ } }
     r.classList.add('on');
     Sound.music(false); if (!m.soundDone) { m.soundDone = true; sfx(b.win ? 'win' : 'loss'); }
@@ -4257,8 +4333,7 @@ s.small { opacity: .6; }
         showToast(`<span>Envio cancelado · <b>${esc(t.title)}</b> voltou para a lista.</span>`); return;
       }
       if (t.done !== today()) return;
-      const gain = t.gain || 0;
-      removeXp(h, gain); unmarkDay(h, t.diff); if (t.wasPunctual) h.stats.punctual = Math.max(0, (h.stats.punctual || 0) - 1);
+      const gain = takeTaskXp(h, t.id, t.gain || 0); unmarkDay(h, t.diff); if (t.wasPunctual) h.stats.punctual = Math.max(0, (h.stats.punctual || 0) - 1);
       Object.assign(t, { done: null, gain: 0, wasPunctual: null });
       S.undo = null; saveCur(h);
       post('undo', `${h.name} desfez "${t.title}"`);
@@ -4274,11 +4349,11 @@ s.small { opacity: .6; }
         b.parts = parts.filter((x) => x !== me); b.partNames = (b.partNames || []).filter((_, k) => k !== i); b.partGains = (b.partGains || []).filter((_, k) => k !== i);
         Object.assign(b, { done: null, doneBy: null, doneByName: null, gain: 0, pending: null });
         h.stats.duo = Math.max(0, (h.stats.duo || 0) - 1); h.stats.board = Math.max(0, (h.stats.board || 0) - 1);
-        removeXp(h, gain); unmarkDay(h, null);
+        gain = takeTaskXp(h, b.id, gain); unmarkDay(h, null);
       } else {
         const wasPending = !!b.pending; gain = wasPending ? 0 : b.gain || 0;
         Object.assign(b, { done: null, doneBy: null, doneByName: null, gain: 0, pending: null, approved: null, punct: null });
-        if (!wasPending) { h.stats.board = Math.max(0, (h.stats.board || 0) - 1); if (t.punct) h.stats.punctual = Math.max(0, (h.stats.punctual || 0) - 1); removeXp(h, gain); }
+        if (!wasPending) { h.stats.board = Math.max(0, (h.stats.board || 0) - 1); if (t.punct) h.stats.punctual = Math.max(0, (h.stats.punctual || 0) - 1); gain = takeTaskXp(h, b.id, gain); }
         unmarkDay(h, t.diff);
       }
       Store.setDoc('board/' + b.id, b); S.undo = null; Store.saveHero(h);
@@ -4295,6 +4370,13 @@ s.small { opacity: .6; }
     settings() { if (!isCreator()) return; S.view = 'settings'; S.diffPreview = null; S.pinErr = ''; render(); scrollTo(0, 0); },
     choreWho(el) { S.choreAssign = el.value; render(); },
     delChore(el) { if (masterLocked()) return; Store.delDoc('chores/' + el.dataset.id); render(); },
+    invite() { if (!canInvite()) return; S.modal = { type: 'invite' }; render(); },
+    copyInvite() {
+      const url = inviteUrl(); const ok = () => { if (S.modal && S.modal.type === 'invite') { S.modal.copied = true; render(); } showToast('Link de convite copiado.'); };
+      const fallback = () => { const i = document.getElementById('invite-url'); if (i) { i.focus(); i.select(); try { document.execCommand('copy'); ok(); return; } catch (e) { /* segue */ } } showToast('Selecione o link e copie.'); };
+      try { navigator.clipboard.writeText(url).then(ok, fallback); } catch (e) { fallback(); }
+    },
+    shareInvite() { const url = inviteUrl(); try { navigator.share({ title: (S.roomMeta && S.roomMeta.name) || 'Guilda da Família', text: inviteText(), url }).catch(() => {}); } catch (e) { /* sem compartilhar */ } },
     copyCode() { const c = S.room; try { navigator.clipboard.writeText(c).then(() => showToast(`Código <b>${c}</b> copiado.`), () => showToast(`Código da sala: <b>${c}</b>`)); } catch (e) { showToast(`Código da sala: <b>${c}</b>`); } },
     create() { if (heroList().length >= D.MAX_HEROES) return; S.draft = { name: '', cls: 'guerreiro', look: randomLook('humano') }; S.view = 'create'; render(); scrollTo(0, 0); },
     open(el) { if (el.dataset.id !== S.me) return; S.heroId = el.dataset.id; S.view = 'hero'; S.tab = 'tarefas'; S.selSkill = null; tidyAll(); render(); scrollTo(0, 0); },
@@ -4332,13 +4414,14 @@ s.small { opacity: .6; }
         saveCur(h); S.undo = { heroId: h.id, before };
         showToast(`<span>Enviada para aprovação · ${esc(t.title)}</span>`, true); post('pend', `${h.name} concluiu "${t.title}" e aguarda aprovação`); return;
       }
-      t.done = today(); t.gain = x.total; t.wasPunctual = x.punctual; if (x.punctual) h.stats.punctual = (h.stats.punctual || 0) + 1;
-      const ups = grantXp(h, x.total); checkAch(h);
+      const rx = grantTaskXp(h, t.id, x.total); const ups = rx.ups;
+      t.done = today(); t.gain = rx.g; t.wasPunctual = x.punctual; if (x.punctual) h.stats.punctual = (h.stats.punctual || 0) + 1;
+      checkAch(h);
       saveCur(h); sfx('task');
       S.undo = { heroId: h.id, before };
       const extras = [x.carried && 'acumulada', x.punctual && 'no horário', x.streak && 'sequência', x.ev && 'evento', x.bday && 'aniversário'].filter(Boolean);
-      showToast(`<span><b>+${x.total} XP</b>${extras.length ? ' (' + extras.join(', ') + ')' : ''} · ${esc(t.title)}</span>`, true);
-      post('task', `${h.name} cumpriu "${t.title}" (+${x.total} XP)`);
+      showToast(`<span><b>+${rx.g} XP</b>${extras.length && rx.g ? ' (' + extras.join(', ') + ')' : ''} · ${esc(t.title)}${capNote(rx)}</span>`, true);
+      post('task', `${h.name} cumpriu "${t.title}" (+${rx.g} XP)`);
       if (ups) { S.modal = { type: 'levelup', heroId: h.id, level: h.level, ups }; post('level', `${h.name} subiu para o nível ${h.level}`); sfx('level'); render(); }
     },
     openChest() {
@@ -4578,6 +4661,14 @@ s.small { opacity: .6; }
     }
     if (form === 'newroom') { createRoom(document.getElementById('room-name').value.trim() || 'Guilda da Família'); return; }
     if (S.readOnly) return;
+    if (form === 'xpcfg') {
+      if (masterLocked()) return;
+      const cap = Math.max(0, Math.min(5000, Math.round(Number(document.getElementById('cap-in').value) || 0)));
+      const mg = Math.max(0, Math.min(5000, Math.round(Number(document.getElementById('mvp-in').value) || 0)));
+      const p = clone(S.party || newParty()); p.xpCap = cap || null; p.mvpGold = mg || null; Store.saveParty(p);
+      post('cfg', cap ? `Limite diário de XP definido em ${cap} XP por personagem` : 'Limite diário de XP removido');
+      showToast(cap ? `<span>Limite diário: <b>${cap} XP</b> por personagem.</span>` : 'Sem limite diário de XP.'); render(); return;
+    }
     if (form === 'chore') {
       if (masterLocked()) return;
       const inp = document.getElementById('chore-title'); const title = inp.value.trim(); if (!title) { inp.focus(); return; }
@@ -4661,29 +4752,29 @@ s.small { opacity: .6; }
     if (t.duo) { // dupla: cada um faz a sua parte; a missão fecha quando o segundo marca
       const parts = t.parts || [];
       if (parts.includes(heroId)) { showToast('Você já fez a sua parte. Falta o parceiro.'); return; }
-      const share = Math.round(total * D.DUO_SHARE);
+      const shareRaw = Math.round(total * D.DUO_SHARE); const share = Math.min(shareRaw, capLeft(h0));
       let ok;
       if (!parts.length) { ok = true; Store.setDoc('board/' + taskId, Object.assign(clone(t), { parts: [heroId], partNames: [h0.name], partGains: [share] })); }
       else ok = await Store.claim('board/' + taskId, { done: today(), doneBy: heroId, doneByName: h0.name, gain: share, parts: parts.concat(heroId), partNames: (t.partNames || []).concat(h0.name), partGains: (t.partGains || []).concat(share) });
       if (!ok) { showToast('Essa missão em dupla já foi fechada.'); render(); return; }
       const h = ensureHero(S.heroes[heroId] || h0); h.stats.done = (h.stats.done || 0) + 1; h.stats.duo = (h.stats.duo || 0) + 1; h.stats.board = (h.stats.board || 0) + 1;
-      markDay(h); logDay(h, 't', 1); const ups = grantXp(h, share); checkAch(h); Store.saveHero(h); sfx('task');
-      showToast(parts.length ? `<span>Dupla completa com <b>${esc(t.partNames[0])}</b>! +${share} XP</span>` : `<span>Sua parte está feita: +${share} XP. Falta um parceiro.</span>`);
+      markDay(h); logDay(h, 't', 1); const rx = grantTaskXp(h, taskId, shareRaw); const ups = rx.ups; checkAch(h); Store.saveHero(h); sfx('task');
+      showToast(parts.length ? `<span>Dupla completa com <b>${esc(t.partNames[0])}</b>! +${rx.g} XP${capNote(rx)}</span>` : `<span>Sua parte está feita: +${rx.g} XP${capNote(rx)}. Falta um parceiro.</span>`);
       post('duo', parts.length ? `${t.partNames[0]} e ${h.name} completaram "${t.title}" em dupla` : `${h.name} fez a parte de "${t.title}" e procura um parceiro`);
       if (ups) S.modal = { type: 'levelup', heroId: h.id, level: h.level, ups };
       render(); return;
     }
     const pend = needsApproval(h0);
-    const ok = await Store.claim('board/' + taskId, { done: today(), doneBy: heroId, doneByName: h0.name, gain: total, pending: pend || null, punct: !pend && x.punctual ? true : null });
+    const ok = await Store.claim('board/' + taskId, { done: today(), doneBy: heroId, doneByName: h0.name, gain: pend ? total : Math.min(total, capLeft(h0)), pending: pend || null, punct: !pend && x.punctual ? true : null });
     if (!ok) { showToast('Alguém já cumpriu essa missão.'); render(); return; }
     const h = ensureHero(S.heroes[heroId] || h0); h.stats.done = (h.stats.done || 0) + 1; h.stats.byDiff[t.diff] = (h.stats.byDiff[t.diff] || 0) + 1;
     markDay(h); logDay(h, 't', 1);
     if (pend) { Store.saveHero(h); showToast(`<span>Missão enviada para aprovação · ${esc(t.title)}</span>`); post('pend', `${h.name} cumpriu a missão "${t.title}" e aguarda aprovação`); render(); return; }
     h.stats.board = (h.stats.board || 0) + 1; if (x.punctual) h.stats.punctual = (h.stats.punctual || 0) + 1;
-    const ups = grantXp(h, total); checkAch(h); Store.saveHero(h); sfx('task');
+    const rx = grantTaskXp(h, taskId, total); const ups = rx.ups; checkAch(h); Store.saveHero(h); sfx('task');
     S.undo = { heroId: h.id, before, board: boardBefore };
-    showToast(`<span><b>${esc(h.name)}</b> +${total} XP · ${esc(t.title)}</span>`, true);
-    post('board', `${h.name} cumpriu a missão da guilda "${t.title}" (+${total} XP)`);
+    showToast(`<span><b>${esc(h.name)}</b> +${rx.g} XP · ${esc(t.title)}${capNote(rx)}</span>`, true);
+    post('board', `${h.name} cumpriu a missão da guilda "${t.title}" (+${rx.g} XP)`);
     if (ups) S.modal = { type: 'levelup', heroId: h.id, level: h.level, ups };
     render();
   }
@@ -4734,6 +4825,11 @@ s.small { opacity: .6; }
     await Store.init();
     await Acct.load();
     S.ready = true;
+    const inv = Store.server ? inviteParam() : null;
+    if (inv) {
+      try { history.replaceState(null, '', location.pathname); } catch (e) { /* ok */ }
+      S.invited = inv; await enterRoom(inv); return;
+    }
     const room = (snap && snap.room) || lsGet('guilda-last-room', null);
     if (room) {
       await enterRoom(room);

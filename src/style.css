@@ -704,3 +704,13 @@ s.small { opacity: .6; }
 .del.undo { color: var(--gold-2); font-size: 17px; }
 .del.undo:hover { background: #3a2a10; }
 .when .date-in { min-width: 150px; }
+/* convite por link */
+.invite-hi { margin: 8px auto 12px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--gold, #e8b84a) 55%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--gold, #e8b84a) 12%, transparent); max-width: 560px; }
+.invite-link { display: flex; gap: 8px; }
+.invite-link input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0,0,0,.25); color: inherit; font: inherit; font-size: 14px; }
+.modal.invite a.btn { text-decoration: none; }
+/* limite diário de XP e destaque do dia */
+.num-in.wide { width: 110px !important; }
+.xpcfg .row { gap: 10px; flex-wrap: wrap; align-items: center; }
+.cap-card.full .bar i { background: var(--bad, #e06464); }
+.mvp-day { margin: 10px 0 0; padding: 8px 10px; border-radius: 10px; background: rgba(232, 184, 74, .08); border: 1px dashed rgba(232, 184, 74, .35); }

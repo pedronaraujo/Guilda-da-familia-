@@ -45,7 +45,8 @@
   let gas = (fn, ...args) => new Promise((res, rej) => window.google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...args));
   // Servidor próprio (Cloudflare): POST /api/<função> com os argumentos em JSON
   const serverCall = async (fn, ...args) => {
-    const r = await fetch('/api/' + fn, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(args), cache: 'no-store' });
+    const au = lsGet('guilda-auth', null);
+    const r = await fetch('/api/' + fn, { method: 'POST', headers: { 'content-type': 'application/json', 'x-guilda-token': (au && au.token) || '' }, body: JSON.stringify(args), cache: 'no-store' });
     let j = null; try { j = await r.json(); } catch (e) { j = null; }
     if (!r.ok || (j && typeof j === 'object' && j.error)) throw new Error((j && j.error) || 'HTTP ' + r.status);
     return j;
@@ -130,6 +131,7 @@
     /* --- Google Apps Script --- */
     takeGas(res) {
       if (!res || res.rev == null || res.room !== S.room) return;
+      if (res.meta) S.roomMeta = res.meta;
       if (res.docs && this.pending === 0 && res.rev >= this.rev) { this.rev = res.rev; this.docs = res.docs; applyDocs(res.docs); afterRemote(); }
       else if (!res.docs && res.rev > this.rev) this.poll();
     },
@@ -141,7 +143,10 @@
     fail(e) {
       console.warn('write', e);
       const code = e && e.code, msg = String((e && e.message) || e || '');
+      if (/\(login\)/.test(msg)) { Acct.expired(); return; }
+      if (S.mode === 'gas') { this.rev = -1; setTimeout(() => this.poll(), 250); } // volta ao que está no servidor
       if (code === 'invalid_argument') { S.readOnly = true; render(); }
+      else if (/outra pessoa|organizador|cheia|expulse/i.test(msg)) showToast(esc(msg));
       else if (code === 'quota_exceeded' || /too_large|grande|quota|storage/i.test(msg)) showToast('Não coube no armazenamento. Apague algumas tarefas antigas.');
       else showToast('Não deu para salvar agora. Tente de novo em instantes.');
     },
@@ -207,25 +212,51 @@
     saveHero(h) { return this.setDoc('heroes/' + h.id, h); },
     deleteHero(id) { return this.delDoc('heroes/' + id); },
     saveParty(p) { return this.setDoc('party/main', p); },
+    // nome e vagas da sala (só no servidor próprio; nos outros modos fica na meta local)
+    async setMeta(patch) {
+      if (S.mode === 'gas' && this.server) { const res = await gas('api_meta', S.room, patch); this.takeGas(res); if (res && res.meta) S.roomMeta = res.meta; return true; }
+      S.roomMeta = Object.assign({}, S.roomMeta || {}, patch);
+      if (S.mode === 'local') { const all = this.localAll(); all['rooms/' + S.room] = S.roomMeta; this.localSave(all); }
+      else if (this.db) await this.db.doc('rooms/' + S.room).set(S.roomMeta);
+      return true;
+    },
   };
   /* ---------------- Conta (login com e-mail e senha, só no servidor próprio) ----------------
      A conta lembra as salas de que a pessoa participa e qual herói ela usa em cada uma. */
+  const sessGet = (k) => { try { return JSON.parse(sessionStorage.getItem(k)); } catch (e) { return null; } };
+  const sessSet = (k, v) => { try { if (v == null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ok */ } };
+  // no site hospedado é preciso ter conta para jogar
+  const needAcct = () => !!Store.server && !S.acct;
   const Acct = {
     saved() { return lsGet('guilda-auth', null); },
     on() { return !!(Store.server && S.acct); },
     async call(fn, ...args) { return serverCall('auth_' + fn, ...args); },
     async load() {
       const sv = this.saved(); if (!Store.server || !sv || !sv.token) return;
-      try { const r = await this.call('me', sv.token); S.acct = { email: r.email, rooms: r.rooms || [], token: sv.token }; }
+      try { const r = await this.call('me', sv.token); S.acct = { email: r.email, id: r.id, hasRecovery: !!r.hasRecovery, rooms: r.rooms || [], token: sv.token }; }
       catch (e) { if (/sess/.test(String(e.message))) lsSet('guilda-auth', null); S.acct = null; }
     },
-    keep(r) { S.acct = { email: r.email, rooms: r.rooms || [], token: r.token || (S.acct && S.acct.token) }; lsSet('guilda-auth', { token: S.acct.token, email: S.acct.email }); },
-    async enter(kind, email, pass) {
-      S.authErr = ''; S.authBusy = true; render();
-      try { this.keep(await this.call(kind, email, pass)); S.authBusy = false; if (S.room) this.room(); render(); showToast(kind === 'register' ? 'Conta criada. Suas salas ficam salvas nela.' : `Olá! Conectado como <b>${esc(S.acct.email)}</b>.`); }
-      catch (e) { S.authBusy = false; S.authErr = String(e.message || e); render(); }
+    keep(r) {
+      S.acct = { email: r.email, id: r.id || (S.acct && S.acct.id), hasRecovery: r.hasRecovery != null ? !!r.hasRecovery : !!(S.acct && S.acct.hasRecovery), rooms: r.rooms || [], token: r.token || (S.acct && S.acct.token) };
+      lsSet('guilda-auth', { token: S.acct.token, email: S.acct.email });
+      if (r.recovery) { S.acct.hasRecovery = true; S.modal = { type: 'recovery', code: r.recovery }; }
     },
-    async logout() { const t = S.acct && S.acct.token; S.acct = null; lsSet('guilda-auth', null); render(); if (t) { try { await this.call('logout', t); } catch (e) { /* ok */ } } },
+    async enter(kind, email, pass, rc) {
+      S.authErr = ''; S.authBusy = true; render();
+      try {
+        this.keep(kind === 'reset' ? await this.call('reset', email, rc, pass) : await this.call(kind, email, pass));
+        S.authBusy = false; S.authMode = 'login';
+        showToast(kind === 'register' ? 'Conta criada! Guarde o código de recuperação.' : kind === 'reset' ? 'Senha nova criada. Guarde o código de recuperação novo.' : `Olá! Conectado como <b>${esc(S.acct.email)}</b>.`);
+        const inv = S.pendingInvite || sessGet('guilda-invite'); S.pendingInvite = null; sessSet('guilda-invite', null);
+        if (inv) { S.invited = inv; await enterRoom(inv); return; }
+        if (S.room) this.room(); else { const last = lsGet('guilda-last-room', null); if (last && (S.acct.rooms || []).some((x) => x.code === last)) { await enterRoom(last); return; } }
+        render();
+      } catch (e) { S.authBusy = false; S.authErr = String(e.message || e); render(); }
+    },
+    async newRecovery() { if (!this.on()) return; try { this.keep(await this.call('recovery', S.acct.token)); render(); } catch (e) { showToast('Não deu para gerar o código agora.'); } },
+    leaveAll() { Store.close(); S.me = null; S.roomMeta = null; S.masterOk = false; applyDocs({}); S.view = 'rooms'; },
+    expired() { S.acct = null; lsSet('guilda-auth', null); this.leaveAll(); S.modal = null; S.authErr = 'Sua sessão expirou. Entre de novo.'; render(); },
+    async logout() { const t = S.acct && S.acct.token; S.acct = null; lsSet('guilda-auth', null); this.leaveAll(); S.modal = null; render(); scrollTo(0, 0); if (t) { try { await this.call('logout', t); } catch (e) { /* ok */ } } },
     // guarda (ou atualiza) a sala atual na conta, com o herói escolhido nela
     room(heroId) {
       if (!this.on() || !S.room) return;
@@ -237,7 +268,7 @@
     async forget(code) { if (!this.on()) return; try { const r = await this.call('room_del', S.acct.token, code); S.acct.rooms = r.rooms || []; render(); } catch (e) { showToast('Não deu para remover agora.'); } },
     heroIn(code) { const r = this.on() && S.acct.rooms.find((x) => x.code === code); return r ? r.hero : null; },
   };
-  function afterRemote() { if (!S.ready || !S.room) return; if (S.me && !S.heroes[S.me] && Object.keys(S.heroes).length) { S.me = null; if (['home', 'hero', 'settings'].includes(S.view)) S.view = 'select'; } tidyAll(); maybeShowReport(); render(); processInbox(); }
+  function afterRemote() { if (!S.ready || !S.room) return; if (S.me && ((!S.heroes[S.me] && Object.keys(S.heroes).length) || (S.heroes[S.me] && !canControl(S.heroes[S.me])))) { const gone = !S.heroes[S.me]; S.me = null; if (['home', 'hero', 'settings', 'bestiary', 'report'].includes(S.view)) S.view = 'select'; if (gone && Store.server) showToast('Seu personagem foi retirado da sala pelo organizador.'); } tidyAll(); maybeShowReport(); render(); processInbox(); }
 
   /* ---------------- Regras ---------------- */
   const heroList = () => Object.values(S.heroes).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
@@ -252,7 +283,23 @@
   // criador principal + co-criadores: todos abrem as configurações; só o principal escolhe co-criadores e o PIN
   const isMainCreator = (id) => !!((id || S.me) && S.party && S.party.creatorId === (id || S.me));
   const isCoCreator = (id) => !!((id || S.me) && S.party && (S.party.coCreators || []).includes(id || S.me));
-  const isCreator = (id) => isMainCreator(id) || isCoCreator(id);
+  /* donos dos personagens: cada herói fica ligado à conta de quem o criou (h.owner) */
+  const myAcct = () => (S.acct && S.acct.id) || null;
+  // organizador = a conta que joga com o criador da sala ou com um co-criador (antes do 1º herói, quem criou a sala)
+  function orgAcct() {
+    if (!Store.server) return true;
+    if (!S.acct) return false;
+    const p = S.party || {}; const ids = [p.creatorId].concat(p.coCreators || []).filter(Boolean);
+    if (!ids.length || !ids.some((id) => S.heroes[id])) return !S.roomMeta || !S.roomMeta.owner || S.roomMeta.owner === myAcct();
+    return ids.some((id) => S.heroes[id] && S.heroes[id].owner === myAcct());
+  }
+  const isMine = (h) => !!h && (!Store.server || (!!h.owner && h.owner === myAcct()));
+  // pode jogar com o herói: o dono, ou o organizador (que cuida dos heróis de quem não tem conta)
+  const canControl = (h) => !!h && (!Store.server || h.owner === myAcct() || orgAcct());
+  const MAX_SLOTS = 6;
+  const roomSlots = () => Math.max(1, Math.min(MAX_SLOTS, Math.round(Number(S.roomMeta && S.roomMeta.slots) || D.MAX_HEROES)));
+  const canCreateHero = () => heroList().length < roomSlots() && (!Store.server || orgAcct() || !heroList().some((h) => h.owner === myAcct()));
+  const isCreator = (id) => isMainCreator(id) || isCoCreator(id) || (id === undefined && !!Store.server && !!S.me && orgAcct());
   const roleTag = (h) => { if (!h) return ''; const f = h.look && h.look.gender === 'f'; return isMainCreator(h.id) ? `<span class="tag crown">${f ? 'Criadora' : 'Criador'} da sala</span>` : isCoCreator(h.id) ? `<span class="tag crown co">${f ? 'Co-criadora' : 'Co-criador'}</span>` : ''; };
   const choreList = () => Object.values(S.chores || {}).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   const goldOf = (h) => Math.max(0, ((S.party && S.party.earned && S.party.earned[h.id]) || 0) + (h.bonusGold || 0) - (h.spent || 0));
@@ -276,6 +323,15 @@
   const fmtBirth = (b) => { if (!b) return ''; const [y, m, d] = b.split('-'); return `${d}/${m}/${y}`; };
   const masterLocked = () => !isCreator() || !!(S.party && S.party.pin && !S.masterOk);
 
+  function chooseHero(id) { S.toast = null; S.me = id; lsSet('guilda-me:' + S.room, S.me); S.masterOk = false; Acct.room(S.me); S.view = 'home'; tidyAll(); render(); scrollTo(0, 0); maybeShowReport(); processInbox(); }
+  // cópia de um herói de outra sala: leva nível, habilidades, visual, equipamentos e relíquias; tarefas e ouro recomeçam
+  function importedHero(src, fromRoom) {
+    const keep = ['name', 'cls', 'look', 'level', 'xp', 'points', 'mastery', 'skills', 'gear', 'cosmetics', 'relics', 'relicOn', 'birth', 'treeV', 'ach', 'stats', 'kudosLog'];
+    const h = { id: 'h' + uidGen(), owner: myAcct(), tasks: [], spent: 0, bonusGold: 0, createdAt: Date.now(), createdDay: today(), importedFrom: { room: fromRoom, at: today() } };
+    for (const k of keep) if (src[k] !== undefined) h[k] = clone(src[k]);
+    h.stats = Object.assign({ done: 0, xp: 0 }, h.stats || {}); h.cosmetics = h.cosmetics || { owned: [] };
+    return h;
+  }
   function newHero(draft) {
     return {
       id: 'h' + uidGen(), name: draft.name.trim(), cls: draft.cls, look: clone(draft.look),
@@ -496,7 +552,9 @@
           if (it.ref && it.ref.type === 'task') { const t = h.tasks.find((x) => x.id === it.ref.id); if (t) { t.pending = null; t.pendXp = 0; } }
           h.stats.done = Math.max(0, (h.stats.done || 0) - 1); notes.push(`Não aprovada: <b>${esc(it.title || 'tarefa')}</b>`);
         } else if (it.kind === 'kudos') {
-          ups += grantXp(h, it.xp || D.KUDOS_XP); h.stats.kudosGot = (h.stats.kudosGot || 0) + 1; notes.push(`${it.emo ? esc(it.emo) + ' ' : ''}<b>${esc(it.fromName)}</b> elogiou você: "${esc(it.msg || '')}" +${it.xp || D.KUDOS_XP} XP`);
+          ups += grantXp(h, it.xp || D.KUDOS_XP); h.stats.kudosGot = (h.stats.kudosGot || 0) + 1;
+          h.kudosLog = h.kudosLog || {}; const ke = it.emo || '⭐'; h.kudosLog[ke] = (h.kudosLog[ke] || 0) + 1;
+          h.kudosLast = [{ e: ke, m: String(it.msg || '').slice(0, 80), from: it.fromName || '', day: today() }].concat(h.kudosLast || []).slice(0, 5); notes.push(`${it.emo ? esc(it.emo) + ' ' : ''}<b>${esc(it.fromName)}</b> elogiou você: "${esc(it.msg || '')}" +${it.xp || D.KUDOS_XP} XP`);
         } else { const r = inboxExtra(h, it); if (r) { ups += r.ups || 0; if (r.note) notes.push(r.note); } }
       }
       checkAch(h); await Store.saveHero(h);
@@ -581,6 +639,19 @@
   }
   // itens da caixa de entrada que chegam pelas batalhas, eventos e pedidos
   function inboxMore(h, it) {
+    // o organizador reabriu uma tarefa que este herói tinha cumprido: o XP sai do herói
+    if (it.kind === 'revoke' && it.ref) {
+      let g = 0;
+      if (it.ref.type === 'task') {
+        const t = (h.tasks || []).find((x) => x.id === it.ref.id); if (!t || (!t.done && !t.pending)) return null;
+        if (t.done) { g = takeTaskXp(h, t.id, t.gain || 0); if (t.wasPunctual) h.stats.punctual = Math.max(0, (h.stats.punctual || 0) - 1); }
+        unmarkDay(h, t.diff); Object.assign(t, { done: null, gain: 0, wasPunctual: null, pending: null, pendXp: 0 });
+      } else {
+        if (!it.pending) { g = takeTaskXp(h, it.ref.id, it.xp || 0); h.stats.board = Math.max(0, (h.stats.board || 0) - 1); }
+        unmarkDay(h, it.diff || null);
+      }
+      return { note: `${esc(it.fromName || 'O organizador')} reabriu <b>${esc(it.title || 'uma tarefa')}</b>${g ? ` · −${g} XP` : ''}` };
+    }
     if (it.kind === 'loot' && it.relic) { const ok = addRelic(h, it.relic); return { note: ok ? `Saque da batalha: <b style="color:${D.RARITY[it.relic.rarity].color}">${esc(it.relic.name)}</b>` : `Mochila cheia: <b>${esc(it.relic.name)}</b> virou ouro` }; }
     if (it.kind === 'refund') { h.redeemed = Math.max(0, (h.redeemed || 0) - (it.cost || 0)); return { note: `Pedido recusado: <b>${esc(it.title)}</b>. ${it.cost} XP de resgate devolvidos.` }; }
     if (it.kind === 'reqok') return { note: `Pedido aprovado: <b>${esc(it.title)}</b>` };
@@ -756,17 +827,22 @@
 
   /* ---------------- Tutorial passo a passo ---------------- */
   const TUT = [
-    { view: 'home', title: 'Bem-vindo à guilda!', text: (h) => `Olá, ${h.name}! Aqui cada tarefa de casa vira experiência para o seu herói. Vou mostrar o caminho em poucos passos.` },
+    { view: 'home', title: 'Bem-vindo à guilda!', text: (h) => `Olá, ${h.name}! Aqui cada tarefa de casa vira experiência para o seu herói. ${Store.server ? 'Ele fica ligado à sua conta: só você e o organizador da sala jogam com ele. ' : ''}Vou mostrar o caminho em poucos passos.` },
     { view: 'home', sel: '.nightfight', title: 'A batalha da noite', text: () => 'Toda meia-noite a guilda enfrenta os inimigos deste card. Aqui ficam o desafio, a dificuldade e a chance de vitória. Vencer dá ouro e avança de estágio.' },
-    { view: 'home', sel: '.slot.mine', title: 'Este é você', text: () => 'Seu herói fica no salão junto com a família. Toque nele para abrir tarefas, habilidades e loja.' },
-    { view: 'home', sel: '.slot.other .kudos-btn', title: 'Elogios com emoji', text: () => 'Elogie alguém com um emoji. Ele aparece embaixo do herói o dia todo, e a pessoa ganha XP. São 3 elogios por dia.' },
-    { view: 'home', sel: '.board', title: 'Quadro da guilda', text: () => 'Missões da casa. Escolha os responsáveis ou deixe para qualquer herói: quem cumprir primeiro leva a experiência.' },
-    { view: 'hero', tab: 'tarefas', sel: '.addtask', title: 'Suas tarefas', text: () => 'Escreva o que vai fazer e escolha a dificuldade: difíceis valem mais. Terminar todas as tarefas do dia abre o baú.' },
-    { view: 'hero', tab: 'tarefas', sel: '.tabs', title: 'Tudo sobre o seu herói', text: () => 'Recompensas da vida real, habilidades, loja, medalhas e visual ficam nestas abas.' },
+    { view: 'home', sel: '.slot.mine', title: 'Este é você', text: () => 'Seu herói fica no salão junto com a família. Toque nele para abrir a página dele.' },
+    { view: 'home', sel: '.hero-cta', title: 'Desenvolva o seu herói', text: () => 'Tarefas, habilidades, loja, conquistas e visual ficam na página do herói. Este botão leva direto para lá.' },
+    { view: 'home', sel: '.slot.other .kudos-btn', title: 'Elogios com emoji', text: () => `Elogie alguém com um emoji: a pessoa ganha XP e o emoji fica embaixo do herói até a meia-noite. Você tem ${D.KUDOS_PER_DAY} elogios por dia, um para cada pessoa.` },
+    { view: 'home', sel: '.board', title: 'Quadro da guilda', text: () => 'Missões da casa, com o rosto de quem é responsável. Use os botões acima da lista para ver só as de uma pessoa. Quem cumprir primeiro leva a experiência; ↺ desfaz.' },
+    { view: 'home', sel: '.mvp-day', title: 'Destaque do dia', text: () => `Quem somar mais XP em tarefas no dia ganha moedas extras à meia-noite, vencendo ou perdendo a batalha.${xpCap() ? ` Nesta sala há um limite de ${xpCap()} XP de tarefas por dia: depois dele, as tarefas ainda contam para o destaque.` : ''}` },
+    { view: 'hero', tab: 'tarefas', sel: '.addtask', title: 'Suas tarefas', text: () => 'Escreva o que vai fazer e escolha a dificuldade e a frequência. Dá para agendar para um dia futuro. Fez sem querer? O botão ↺ desfaz e tira o XP.' },
+    { view: 'hero', tab: 'tarefas', sel: '.kudos-sum', title: 'Seus elogios', text: () => 'Aqui fica o resumo de todos os elogios que você já recebeu, por emoji.' },
+    { view: 'hero', tab: 'tarefas', sel: '.tabs', title: 'Tudo sobre o seu herói', text: () => 'Recompensas da vida real, habilidades, loja, medalhas e visual (roupas temáticas e aniversário) ficam nestas abas.' },
     { view: 'hero', tab: 'habilidades', sel: '.tree', title: 'Habilidades', text: () => 'Cada nível dá 1 ponto. Gaste aqui: as habilidades deixam o herói bem mais forte na batalha. A árvore vai até o nível 50.' },
     { view: 'hero', tab: 'loja', sel: '.shop-cats', title: 'Loja', text: () => 'Use o ouro das vitórias em equipamentos, poções e itens de estilo. Toque na imagem de um item para ver de perto.' },
-    { view: 'home', sel: '[data-act=settings]', title: 'Configurações', text: () => 'Como criador, aqui você define tarefas obrigatórias, recompensas, dificuldade, PIN e co-criadores.' },
-    { view: 'home', sel: '[data-act=tutorial]', title: 'Pronto para a aventura!', text: () => 'Para rever este passo a passo quando quiser, toque em Tutorial.' },
+    { view: 'home', sel: '.nav-btn', title: 'Menu', text: () => `Todas as partes do app estão neste menu: salão, cada aba do herói, bestiário, convite${isCreator() ? ', configurações e relatório' : ''}, trocar de sala e sair da conta.` },
+    { view: 'home', sel: '.sessbar [data-act=invite]', title: 'Convidar a família', text: () => 'Gere um link e mande no WhatsApp: quem abrir entra direto na sala e cria o próprio herói.' },
+    { view: 'home', sel: '.nav-btn', title: 'Para o organizador', skip: () => !isCreator(), text: () => 'Em Menu → Configurações você muda o nome e as vagas da sala, o limite diário de XP, o bônus do destaque, aprovação de tarefas, personagens importados, reabre tarefas feitas e expulsa heróis.' },
+    { view: 'home', sel: '.nav-btn', title: 'Pronto para a aventura!', text: () => 'Para rever este passo a passo quando quiser, abra o Menu e toque em Tutorial.' },
   ];
   const tutOff = () => { try { return localStorage.getItem('guilda-notut') === '1'; } catch (e) { return false; } };
   function maybeStartTut() {
@@ -781,7 +857,7 @@
       const st = TUT[i];
       if (st.view === 'home') { S.view = 'home'; S.heroId = null; } else { S.view = 'hero'; S.heroId = S.me; S.tab = st.tab || 'tarefas'; }
       S.tut.i = i; render();
-      if (!st.sel || document.querySelector(st.sel)) break;
+      if (!(st.skip && st.skip()) && (!st.sel || document.querySelector(st.sel))) break;
       i += dir;
     }
     if (i < 0) { S.tut.i = 0; return; }
@@ -832,7 +908,7 @@
     return `<header class="topbar"><div class="brand">${back}<h1>${esc(inRoom ? title : 'Guilda da Família')}</h1></div>
       ${inRoom ? `<div class="chips">${Acct.on() && S.acct.rooms.length > 1 ? `<label class="chip room-sw"><span class="sr-only">Trocar de sala</span><select id="room-switch" aria-label="Trocar de sala">${S.acct.rooms.map((r) => `<option value="${esc(r.code)}" ${r.code === S.room ? 'selected' : ''}>${esc(r.name || r.code)} · ${esc(r.code)}</option>`).join('')}</select></label>` : `<span class="chip">Sala <b class="num">${esc(S.room)}</b></span>`}${S.party && S.view !== 'select' ? `<span class="chip">Estágio <b class="num">${stage()}</b> · ${esc(E.regionOf(stage()).name)}</span><span class="chip warn">Batalha à meia-noite · <b class="num">${countdown()}</b></span>` : ''}</div>` : ''}</header>
       ${inRoom ? `<div class="sessbar">${me ? `<span class="who">${A.heroSvg(me, { noPet: true, noWeapon: true })}<span>Jogando como <b>${esc(me.name)}</b> ${roleTag(me)}</span></span>` : '<span class="muted">Escolha seu personagem</span>'}
-        <span class="spacer"></span>${canInvite() ? '<button class="btn sm" data-act="invite">Convidar</button>' : ''}<button class="btn sm ghost" data-act="toggleSound" aria-pressed="${Sound.on}">${Sound.on ? 'Som ligado' : 'Som desligado'}</button>${me ? '<button class="btn sm ghost" data-act="tutorial">Tutorial</button>' : ''}${isCreator() && S.view !== 'settings' ? `<button class="btn sm" data-act="settings">Configurações${adminBadge() ? `<span class="dot">${adminBadge()}</span>` : ''}</button>` : ''}${me ? `<button class="btn sm ghost" data-act="switchHero">Trocar personagem</button>` : ''}<button class="btn sm ghost" data-act="leaveRoom">Sair da sala</button></div>` : ''}`;
+        <span class="spacer"></span>${canInvite() ? '<button class="btn sm" data-act="invite">Convidar</button>' : ''}<button class="btn sm ghost" data-act="toggleSound" aria-pressed="${Sound.on}">${Sound.on ? 'Som ligado' : 'Som desligado'}</button>${navMenu(me)}</div>` : ''}`;
   }
   /* ----- Convite por link ----- */
   const canInvite = () => !!Store.server && /^https?:$/.test(location.protocol) && !!S.room;
@@ -841,53 +917,101 @@
     try { const q = new URLSearchParams(location.search).get('sala') || (location.hash.match(/sala=([A-Za-z0-9]{6})/) || [])[1]; const c = q ? normCode(q) : ''; return c.length === 6 ? c : null; } catch (e) { return null; }
   }
   const inviteText = () => `Venha para a nossa guilda "${(S.roomMeta && S.roomMeta.name) || 'Guilda da Família'}" e transforme as tarefas em aventura! Entre por este link:`;
+  /* ----- Menu suspenso com todas as partes do app ----- */
+  const HERO_TABS = [['tarefas', 'Tarefas', 'o que fazer hoje'], ['recompensas', 'Recompensas', 'troque XP por prêmios'], ['habilidades', 'Habilidades', 'evolua o herói'], ['loja', 'Loja', 'equipamentos, roupas e poções'], ['conquistas', 'Conquistas', 'medalhas'], ['visual', 'Visual', 'aparência e aniversário']];
+  function navMenu(me) {
+    const it = (act, label, sub, extra) => `<button class="nav-it" role="menuitem" data-act="${act}" ${extra || ''}><span>${label}</span>${sub ? `<span class="small muted">${sub}</span>` : ''}</button>`;
+    const badge = me && me.points ? `<span class="dot">${me.points}</span>` : '';
+    return `<div class="navmenu${S.navOpen ? ' open' : ''}"><button class="btn sm primary nav-btn" data-act="navToggle" aria-haspopup="menu" aria-expanded="${!!S.navOpen}">Menu ▾${badge}</button>
+      ${S.navOpen ? `<div class="nav-pop" role="menu">
+        ${me ? `<div class="nav-g">Guilda</div>${it('navGo', 'Salão da guilda', 'batalha, quadro e ranking', 'data-v="home"')}${it('navGo', 'Bestiário', 'monstros já enfrentados', 'data-v="bestiary"')}${S.party && S.party.last ? it('navGo', 'Rever última batalha', '', 'data-v="replay"') : ''}
+        <div class="nav-g">Meu herói · ${esc(me.name)}</div>${HERO_TABS.map(([k, n, sub]) => it('navGo', n + (k === 'habilidades' && me.points ? ` <span class="dot">${me.points}</span>` : ''), sub, `data-v="tab:${k}"`)).join('')}` : ''}
+        <div class="nav-g">Sala</div>${isCreator() && me ? it('navGo', 'Configurações', 'regras, heróis e convites', 'data-v="settings"') + it('navGo', 'Relatório semanal', '', 'data-v="report"') : ''}${canInvite() ? it('navGo', 'Convidar pessoas', 'link para a família', 'data-v="invite"') : ''}${me ? it('navGo', 'Tutorial', 'como tudo funciona', 'data-v="tutorial"') : ''}${me ? it('navGo', 'Trocar personagem', '', 'data-v="switchHero"') : ''}${it('navGo', 'Trocar de sala', '', 'data-v="leaveRoom"')}
+        ${Acct.on() ? `<div class="nav-g">Conta</div>${it('navGo', 'Sair da conta', esc(S.acct.email), 'data-v="logout"')}` : ''}
+      </div>` : ''}</div>`;
+  }
   const adminBadge = () => pendingItems().length + (typeof openRequests === 'function' ? openRequests().length : 0);
   /* ----- Entrada: código da sala ----- */
   function roomsView() {
     const last = lsGet('guilda-last-room', null);
+    if (needAcct()) {
+      const inv = S.pendingInvite || sessGet('guilda-invite');
+      return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Tarefas da família viram aventura</div><h2>Entre na sua conta</h2>
+        <p class="muted">Cada pessoa da família usa a própria conta. Assim o seu personagem fica ligado a você e ninguém mais mexe nele.</p>
+        ${inv ? `<div class="invite-hi">Você recebeu um convite para a sala <b class="num">${esc(inv)}</b>. Entre ou crie uma conta e a gente te leva até lá.</div>` : ''}</div>
+        ${accountCard()}</section>`;
+    }
     return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Tarefas da família viram aventura</div><h2>Entre na sala da sua guilda</h2>
-      <p class="muted">Cada sala é uma guilda separada, com até 5 heróis. Quem cria a sala recebe um código para passar para a família.</p></div>
+      <p class="muted">Cada sala é uma guilda separada. Quem cria a sala vira o organizador e recebe um link para convidar a família.</p></div>
       ${accountCard()}
       <div class="grid2"><form class="card" data-form="join"><div class="eyebrow">Já tenho um código</div><h3>Entrar numa sala</h3>
         <div class="field" style="margin-top:12px"><label for="room-code">Código da sala</label><input type="text" id="room-code" class="code-in" maxlength="6" placeholder="ABC123" autocomplete="off" autocapitalize="characters" value="${esc(S.joinDraft || '')}"></div>
         ${S.roomErr ? `<p class="small" style="color:var(--bad);margin-top:-8px">${esc(S.roomErr)}</p>` : ''}
         <div class="row"><button class="btn primary" type="submit">Entrar</button>${last ? `<button class="btn ghost" type="button" data-act="joinLast">Voltar para ${esc(last)}</button>` : ''}</div></form>
       <form class="card" data-form="newroom"><div class="eyebrow">Começar do zero</div><h3>Criar sala nova</h3>
-        <div class="field" style="margin-top:12px"><label for="room-name">Nome da guilda</label><input type="text" id="room-name" value="${esc((S.inputs || {})["room-name"] || "")}" maxlength="28" placeholder="Guilda da Família" autocomplete="off"></div>
-        <p class="small muted" style="margin-top:-6px">O primeiro herói criado na sala vira o criador e controla as configurações.</p>
+        <div class="field" style="margin-top:12px"><label for="room-name">Nome da guilda</label><input type="text" id="room-name" value="${esc((S.inputs || {})["room-name"] || "")}" maxlength="40" placeholder="Guilda da Família" autocomplete="off"></div>
+        <div class="field"><label for="room-slots">Vagas de heróis</label><select id="room-slots" class="txt sel">${slotOpts(5)}</select></div>
+        <p class="small muted" style="margin-top:-6px">Você vira o organizador: controla as configurações, pode criar heróis para quem não tem conta (como crianças pequenas) e convida a família por link.</p>
         <button class="btn primary" type="submit">Criar sala</button></form></div></section>`;
   }
+  const slotOpts = (cur, min) => Array.from({ length: MAX_SLOTS }, (_, i) => i + 1).filter((n) => !min || n >= min).map((n) => `<option value="${n}" ${n === cur ? 'selected' : ''}>${n} ${n === 1 ? 'herói' : 'heróis'}</option>`).join('');
   function accountCard() {
     if (!Store.server) return '';
     if (!S.acct) {
-      return `<section class="card acct-card"><div class="card-h"><div><div class="eyebrow">Conta (opcional)</div><h3>Entrar com e-mail</h3></div><span class="small muted">Com uma conta, todas as suas salas ficam reunidas e você troca entre elas num toque, em qualquer aparelho.</span></div>
+      if (S.authMode === 'forgot') {
+        return `<section class="card acct-card"><div class="card-h"><div><div class="eyebrow">Esqueci minha senha</div><h3>Criar uma senha nova</h3></div></div>
+          <p class="small muted" style="margin:0 0 10px">Use o <b>código de recuperação</b> que apareceu quando você criou a conta (16 letras e números, como ABCD-EF23-GH45-JK67). Ele é trocado por um novo depois de usado.</p>
+          <form class="acct-form" data-form="reset">
+            <div class="field"><label for="acct-email">E-mail</label><input type="email" id="acct-email" autocomplete="username" maxlength="120" value="${esc((S.inputs || {})['acct-email'] || '')}"></div>
+            <div class="field"><label for="acct-rc">Código de recuperação</label><input type="text" id="acct-rc" autocomplete="off" autocapitalize="characters" maxlength="24" placeholder="XXXX-XXXX-XXXX-XXXX" class="rc-in"></div>
+            <div class="field"><label for="acct-pass">Senha nova</label><input type="password" id="acct-pass" autocomplete="new-password" maxlength="200" placeholder="Pelo menos 6 caracteres"></div>
+            ${S.authErr ? `<p class="small" style="color:var(--bad);margin:0">${esc(S.authErr)}</p>` : ''}
+            <div class="row"><button class="btn primary" type="submit" ${S.authBusy ? 'disabled' : ''}>Criar senha nova</button><button class="btn ghost" type="button" data-act="authMode" data-v="login">Voltar</button></div>
+          </form>
+          <p class="small muted" style="margin:10px 0 0">Perdeu o código também? Peça ao organizador da sala para criar um personagem novo para você numa conta nova.</p></section>`;
+      }
+      return `<section class="card acct-card"><div class="card-h"><div><div class="eyebrow">Sua conta</div><h3>Entrar com e-mail</h3></div><span class="small muted">Com a conta, suas salas ficam reunidas e você troca entre elas num toque, em qualquer aparelho.</span></div>
         <form class="acct-form" data-form="login">
           <div class="field"><label for="acct-email">E-mail</label><input type="email" id="acct-email" autocomplete="username" maxlength="120" placeholder="voce@exemplo.com" value="${esc((S.inputs || {})['acct-email'] || '')}"></div>
           <div class="field"><label for="acct-pass">Senha</label><input type="password" id="acct-pass" autocomplete="current-password" maxlength="200" placeholder="Pelo menos 6 caracteres"></div>
           ${S.authErr ? `<p class="small" style="color:var(--bad);margin:0">${esc(S.authErr)}</p>` : ''}
-          <div class="row"><button class="btn primary" type="submit" ${S.authBusy ? 'disabled' : ''}>Entrar</button><button class="btn ghost" type="button" data-act="register" ${S.authBusy ? 'disabled' : ''}>Criar conta</button></div>
+          <div class="row"><button class="btn primary" type="submit" ${S.authBusy ? 'disabled' : ''}>Entrar</button><button class="btn" type="button" data-act="register" ${S.authBusy ? 'disabled' : ''}>Criar conta</button><span class="spacer"></span><button class="linkbtn" type="button" data-act="authMode" data-v="forgot">Esqueci minha senha</button></div>
         </form></section>`;
     }
     const rooms = S.acct.rooms || [];
-    return `<section class="card acct-card"><div class="card-h"><div><div class="eyebrow">Minhas salas</div><h3>${esc(S.acct.email)}</h3></div><span class="row" style="gap:6px"><button class="btn sm ghost" data-act="showLogin">${S.passOpen ? 'Fechar' : 'Trocar senha'}</button><button class="btn sm ghost" data-act="logout">Sair da conta</button></span></div>
+    return `<section class="card acct-card"><div class="card-h"><div><div class="eyebrow">Minhas salas</div><h3>${esc(S.acct.email)}</h3></div><span class="row" style="gap:6px"><button class="btn sm ghost" data-act="showLogin">${S.passOpen ? 'Fechar' : 'Trocar senha'}</button><button class="btn sm ghost" data-act="newRecovery">Código de recuperação</button><button class="btn sm ghost" data-act="logout">Sair da conta</button></span></div>
+      ${S.acct.hasRecovery ? '' : `<div class="warn-note small">Sua conta ainda não tem código de recuperação. Sem ele, não dá para recuperar a senha se você esquecer. <button class="btn sm primary" data-act="newRecovery">Gerar agora</button></div>`}
       ${S.passOpen ? `<form class="acct-form" data-form="pass" style="margin-top:10px"><div class="field"><label for="pass-old">Senha atual</label><input type="password" id="pass-old" autocomplete="current-password"></div><div class="field"><label for="pass-new">Senha nova</label><input type="password" id="pass-new" autocomplete="new-password" placeholder="Pelo menos 6 caracteres"></div>${S.authErr ? `<p class="small" style="color:var(--bad);margin:0">${esc(S.authErr)}</p>` : ''}<div class="row"><button class="btn primary" type="submit">Salvar senha nova</button></div></form>` : ''}
       ${rooms.length ? `<ul class="my-rooms">${rooms.map((r) => `<li><button class="room-go" data-act="goRoom" data-code="${esc(r.code)}"><b>${esc(r.name || r.code)}</b><span class="small muted">Sala ${esc(r.code)}${r.heroName ? ' · ' + esc(r.heroName) : ''}</span></button><button class="del" data-act="forgetRoom" data-code="${esc(r.code)}" title="Tirar da lista" aria-label="Tirar ${esc(r.name || r.code)} da lista">×</button></li>`).join('')}</ul>`
         : '<p class="small muted" style="margin:10px 0 0">Nenhuma sala ainda. Entre com um código ou crie uma sala: ela fica guardada aqui.</p>'}</section>`;
   }
   /* ----- Escolha do personagem ----- */
   function selectView() {
-    const hs = heroList();
-    const cards = hs.map((h) => { const c = D.CLASSES[h.cls]; return `<button class="pickme" data-act="pickMe" data-id="${h.id}"><span class="lv num">Nv ${h.level}</span><div class="fig"><div class="idle">${A.heroSvg(h)}</div></div><div class="nm">${esc(h.name)}</div><div class="cl"><span style="color:${c.color}">${c.name}</span> · ${ancOf(h).name}</div>${roleTag(h)}</button>`; }).join('');
-    const invited = S.invited === S.room;
-    return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Sala ${esc(S.room)}</div>${invited ? `<div class="invite-hi">Você foi convidado para <b>${esc((S.roomMeta && S.roomMeta.name) || 'a guilda')}</b>! ${hs.length < D.MAX_HEROES ? 'Crie o seu herói ou, se já tem um aqui, toque nele.' : 'A guilda já tem 5 heróis. Se um deles é seu, toque nele.'}</div>` : ''}<h2>Quem está jogando?</h2><p class="muted">Escolha o seu personagem. Você só mexe nas tarefas, habilidades e itens dele.${S.party && !S.party.creatorId ? ' O primeiro herói criado vira o criador da sala.' : ''}</p></div>
-      <div class="picklist">${cards}${hs.length < D.MAX_HEROES ? `<button class="pickme new" data-act="create" ${S.readOnly ? 'disabled' : ''}><div class="fig"><span class="plus">+</span></div><div class="nm">Criar herói</div><div class="cl">Vaga ${hs.length + 1} de ${D.MAX_HEROES}</div></button>` : ''}</div>
+    const hs = heroList(); const org = orgAcct(); const acct = Store.server && S.acct;
+    const cards = hs.map((h) => {
+      const c = D.CLASSES[h.cls];
+      const mine = acct && h.owner === myAcct(); const free = acct && !h.owner; const locked = acct && !mine && !org && !free;
+      const tag = !acct ? '' : mine ? '<span class="tag own">Seu personagem</span>' : free ? '<span class="tag free">Sem conta ligada</span>' : org ? '<span class="tag org">Você controla (organizador)</span>' : '<span class="tag lock">De outra pessoa</span>';
+      return `<button class="pickme${locked ? ' locked' : ''}" data-act="pickMe" data-id="${h.id}" ${locked ? 'aria-disabled="true"' : ''}><span class="lv num">Nv ${h.level}</span><div class="fig"><div class="idle">${A.heroSvg(h)}</div></div><div class="nm">${esc(h.name)}</div><div class="cl"><span style="color:${c.color}">${c.name}</span> · ${ancOf(h).name}</div>${roleTag(h)}${tag}</button>`;
+    }).join('');
+    const invited = S.invited === S.room; const canNew = canCreateHero() && !S.readOnly;
+    const full = hs.length >= roomSlots();
+    const imp = acct ? (S.acct.rooms || []).filter((r) => r.code !== S.room && r.hero) : [];
+    const impCard = imp.length && canNew ? (S.party && S.party.allowImport
+      ? `<section class="card import-card"><div class="card-h"><div><div class="eyebrow">Da sua conta</div><h3>Trazer um personagem de outra sala</h3></div><span class="small muted">Vem com nível, habilidades, visual e itens. Tarefas e ouro começam do zero nesta sala.</span></div>
+          <div class="opts">${imp.map((r) => `<button class="opt" data-act="importHero" data-code="${esc(r.code)}" data-id="${esc(r.hero)}"><b>${esc(r.heroName || 'Herói')}</b> <span class="small muted">de ${esc(r.name || r.code)}</span></button>`).join('')}</div></section>`
+      : `<p class="small muted" style="margin-top:12px">O organizador desta sala não permite trazer personagens de outras salas. Crie um herói novo.</p>`) : '';
+    const sub = acct && !org && hs.some((h) => h.owner === myAcct()) ? ' Você já tem um personagem aqui.' : '';
+    return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Sala ${esc(S.room)}</div>${invited ? `<div class="invite-hi">Você foi convidado para <b>${esc((S.roomMeta && S.roomMeta.name) || 'a guilda')}</b>! ${full ? `A guilda já está cheia (${roomSlots()} heróis). Se um deles é seu, toque nele.` : 'Crie o seu herói ou traga um de outra sala.'}</div>` : ''}<h2>Quem está jogando?</h2><p class="muted">${acct ? `Escolha o seu personagem. Cada um é ligado a uma conta: só o dono e o organizador da sala jogam com ele.${sub}` : 'Escolha o seu personagem. Você só mexe nas tarefas, habilidades e itens dele.'}${S.party && !S.party.creatorId ? ' O primeiro herói criado vira o criador da sala.' : ''}</p></div>
+      <div class="picklist">${cards}${canNew ? `<button class="pickme new" data-act="create"><div class="fig"><span class="plus">+</span></div><div class="nm">Criar herói</div><div class="cl">Vaga ${hs.length + 1} de ${roomSlots()}</div></button>` : ''}</div>
+      ${impCard}
       <p class="small muted" style="margin-top:16px">${canInvite() ? `<button class="btn sm" data-act="invite">Convidar com link</button> ou passe o código <b>${esc(S.room)}</b>.` : `Passe o código <b>${esc(S.room)}</b> para a família entrar na mesma sala.`}</p></section>`;
   }
 
   function homeView() {
     const hs = heroList();
     const slots = [];
-    for (let i = 0; i < D.MAX_HEROES; i++) {
+    for (let i = 0; i < roomSlots(); i++) {
       const h = hs[i];
       if (h) {
         const c = D.CLASSES[h.cls]; const mine = h.id === S.me;
@@ -896,13 +1020,14 @@
           <div class="nm">${esc(h.name)}</div><div class="cl"><span style="color:${c.color}">${c.name}</span> · ${ancOf(h).name}</div>
           <div class="bar" style="margin:6px 12px 0"><i style="width:${Math.round((h.xp / D.xpToNext(h.level)) * 100)}%"></i></div>
           <div class="pend muted">${mine ? '<b style="color:var(--gold-2)">Você</b> · ' : ''}${done ? `${done} feita${done > 1 ? 's' : ''} hoje` : ''}${done && pend ? ' · ' : ''}${pend ? `${pend} pendente${pend > 1 ? 's' : ''}` : ''}${!done && !pend ? 'Sem tarefas hoje' : ''}</div>
-          ${streakNow(h) > 1 ? `<div class="small" style="color:#ffb070">${streakNow(h)} dias seguidos</div>` : ''}${isBday(h) ? '<div class="tag bday-tag">Aniversariante</div>' : ''}${kudosStrip(h.id)}
-          ${!mine && S.me && !S.readOnly ? `<button class="btn sm kudos-btn" data-act="askKudos" data-id="${h.id}" ${kudosLeft(h.id) ? '' : 'disabled'}>${kudosGivenTo(h.id) ? 'Elogiado hoje' : 'Elogiar'}</button>` : ''}</${mine ? 'button' : 'div'}>`);
-      } else slots.push(`<div class="slot empty"><div class="fig"><span class="plus">+</span>Vaga livre</div><div class="cl">Vaga ${i + 1} de ${D.MAX_HEROES}</div></div>`);
+          <div class="slot-foot"><div class="slot-tags">${streakNow(h) > 1 ? `<span class="small" style="color:#ffb070">${streakNow(h)} dias seguidos</span>` : ''}${isBday(h) ? '<span class="tag bday-tag">Aniversariante</span>' : ''}</div>
+          <div class="kudos-row">${kudosStrip(h.id)}</div>
+          <div class="kudos-act">${!mine && S.me && !S.readOnly ? `<button class="btn sm kudos-btn" data-act="askKudos" data-id="${h.id}" ${kudosLeft(h.id) ? '' : 'disabled'}>${kudosGivenTo(h.id) ? 'Elogiado hoje' : kudosLeftN() ? 'Elogiar' : 'Elogios de hoje usados'}</button>` : ''}</div></div></${mine ? 'button' : 'div'}>`);
+      } else slots.push(`<div class="slot empty"><div class="fig"><span class="plus">+</span>Vaga livre</div><div class="cl">Vaga ${i + 1} de ${roomSlots()}</div></div>`);
     }
     return `${bdayBanner()}${battleBanner()}
-      <section class="stage"><div class="lineup">${slots.join('')}</div></section>
-      <p class="muted" style="margin:-8px 0 18px">Toque no seu herói para ver suas tarefas de hoje. Novos membros entram pela tela de escolha de personagem.</p>
+      <section class="stage"><div class="lineup" style="--n:${roomSlots()}">${slots.join('')}</div></section>
+      ${S.me && S.heroes[S.me] ? `<section class="hero-cta"><div class="ic">${A.heroSvg(S.heroes[S.me], { noPet: true, noWeapon: true })}</div><div><b>Desenvolva ${esc(S.heroes[S.me].name)}</b><div class="small muted">Tarefas de hoje, habilidades, loja, conquistas e visual ficam na página do herói. Toque no seu herói acima ou use o botão.</div></div><div class="row" style="gap:6px"><button class="btn primary" data-act="open" data-id="${S.me}">Abrir meu herói${S.heroes[S.me].points ? ` <span class="dot">${S.heroes[S.me].points}</span>` : ''}</button></div></section>` : ''}
       ${eventCard()}
       ${boardCard()}
       <div class="grid2">${lastBattleCard()}${rankingCard()}</div>
@@ -930,10 +1055,20 @@
     for (const g of heroList()) { const k = g.kudos; if (!k || k.day !== t || !(k.to || []).includes(id)) continue; const e = (k.emo || {})[id] || { e: '⭐', m: '' }; out.push({ from: g.name, e: e.e || '⭐', m: e.m || '' }); }
     return out;
   }
+  // resumo de todos os elogios que o herói já recebeu, por tipo
+  function kudosSummary(h) {
+    const log = h.kudosLog || {}; const counted = Object.values(log).reduce((a, b) => a + b, 0); const total = Math.max(counted, (h.stats && h.stats.kudosGot) || 0);
+    if (!total) return `<div class="kudos-sum muted small">Nenhum elogio recebido ainda.</div>`;
+    const parts = Object.entries(log).sort((a, b) => b[1] - a[1]).map(([e, n]) => `<span class="ks"><span class="ke">${esc(e)}</span><b class="num">${n}</b></span>`).join('');
+    const older = total - counted;
+    const last = (h.kudosLast || [])[0];
+    return `<div class="kudos-sum"><span class="small muted">Elogios recebidos</span>${parts}${older ? `<span class="ks small muted">+${older} antigos</span>` : ''}<span class="small muted">· ${total} no total</span>${last ? `<span class="small muted ks-last" title="${esc(last.from)}: ${esc(last.m)}">Último: ${esc(last.e)} "${esc(last.m)}"${last.from ? ` de ${esc(last.from)}` : ''}</span>` : ''}</div>`;
+  }
   function kudosStrip(id) {
     const ks = kudosFor(id); if (!ks.length) return '';
     return `<div class="kudos-emo" title="${esc(ks.map((k) => `${k.from}: ${k.e} ${k.m}`).join(' · '))}">${ks.map((k) => `<span class="ke" aria-label="Elogio de ${esc(k.from)}">${k.e}</span>`).join('')}</div>`;
   }
+  const kudosLeftN = () => { const h = S.me && S.heroes[S.me]; if (!h) return 0; const k = h.kudos && h.kudos.day === today() ? h.kudos : { to: [] }; return Math.max(0, D.KUDOS_PER_DAY - k.to.length); };
   const kudosLeft = (id) => { const h = S.me && S.heroes[S.me]; if (!h) return false; const k = h.kudos && h.kudos.day === today() ? h.kudos : { to: [] }; return k.to.length < D.KUDOS_PER_DAY && !k.to.includes(id); };
   // responsáveis por uma missão do quadro: lista vazia = qualquer herói
   const whoOf = (t) => (t && Array.isArray(t.who) ? t.who.filter((id) => S.heroes[id]) : []);
@@ -956,6 +1091,8 @@
   const boardFilterOk = (t) => { const f = S.boardFilter; if (!f || !S.heroes[f]) return true; const w = whoOf(t); return !w.length || w.includes(f); };
   // pode desfazer: missão que eu cumpri hoje (ou minha parte numa dupla)
   const canUndoBoard = (t) => !!S.me && !S.readOnly && ((t.done === today() && (t.doneBy === S.me || (t.parts || []).includes(S.me))) || (!t.done && (t.parts || []).includes(S.me)));
+  // o organizador pode reabrir uma missão cumprida por outra pessoa (o XP sai de quem cumpriu)
+  const canReopen = (t) => !!S.me && !S.readOnly && isCreator() && (t.done === today() || (t.parts || []).length > 0) && !canUndoBoard(t);
   const toggleWho = (list, v) => (v === '' ? [] : list.includes(v) ? list.filter((x) => x !== v) : list.concat(v));
   function boardRow(t) {
     const d = D.DIFF[t.diff]; const x = xpFor(t);
@@ -974,7 +1111,7 @@
       <button class="done-btn" data-act="${blocked ? 'noop' : 'doneBoard'}" data-id="${t.id}" aria-label="${t.done ? 'Cumprida' : 'Cumprir ' + esc(t.title)}" ${blocked ? 'disabled' : ''}${notMine && !t.done ? ` title="Missão de ${esc(who.map((id) => S.heroes[id].name).join(', '))}"` : ''}>${t.done ? '✓' : mine ? '½' : ''}</button>
       <div><div class="t">${esc(t.title)}${boardFaces(t)}</div><div class="sub">${meta}</div></div>
       <div class="xp num">${xpTxt}</div>
-      <div class="tact">${canUndoBoard(t) ? `<button class="del undo" data-act="undoBoard" data-id="${t.id}" aria-label="Desfazer: ${esc(t.title)}" title="Desfazer (não fiz)">↺</button>` : ''}${!t.done && !parts.length ? `<button class="del" data-act="editTask" data-scope="board" data-id="${t.id}" aria-label="Editar missão" title="Editar">✎</button>` : ''}<button class="del" data-act="delBoard" data-id="${t.id}" aria-label="Apagar missão" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button></div></li>`;
+      <div class="tact">${canUndoBoard(t) ? `<button class="del undo" data-act="undoBoard" data-id="${t.id}" aria-label="Desfazer: ${esc(t.title)}" title="Desfazer (não fiz)">↺</button>` : canReopen(t) ? `<button class="del undo" data-act="reopenBoard" data-id="${t.id}" aria-label="Reabrir: ${esc(t.title)}" title="Reabrir (tira o XP de quem cumpriu)">↺</button>` : ''}${!t.done && !parts.length ? `<button class="del" data-act="editTask" data-scope="board" data-id="${t.id}" aria-label="Editar missão" title="Editar">✎</button>` : ''}<button class="del" data-act="delBoard" data-id="${t.id}" aria-label="Apagar missão" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button></div></li>`;
   }
   function boardFilterBar() {
     const hs = heroList(); if (hs.length < 2) return '';
@@ -1105,7 +1242,7 @@
       <div class="field"><span class="lbl">${['humano', 'anao', 'elfo', 'gigante', 'halfling', 'fauno'].includes(anc.id) ? 'Tom de pele' : 'Cor da pele'}</span>${sws('skin', anc.skins)}</div>
       <div class="field"><span class="lbl">Rosto</span>${chips('face', L.face)}</div>
       <div class="field"><span class="lbl">Cabelo</span>${chips('hairStyle', L.hairStyle)}<div style="height:8px"></div>${sws('hairColor', L.hairColor)}</div>
-      <div class="field"><span class="lbl">Roupa</span>${chips('outfit', L.outfit)}<div style="height:8px"></div>${sws('outfitColor', L.outfitColor)}</div>`;
+      <div class="field"><span class="lbl">Roupa</span>${chips('outfit', L.outfit.filter((o) => !o.theme))}<div class="small muted" style="margin:8px 0 4px">Temáticas</div>${chips('outfit', L.outfit.filter((o) => o.theme))}<div style="height:8px"></div><span class="small muted">Cor (nas temáticas, muda o detalhe)</span>${sws('outfitColor', L.outfitColor)}</div>`;
   }
   function createView() {
     const d = S.draft;
@@ -1118,7 +1255,7 @@
       <div><h2 style="margin-bottom:16px">Novo herói</h2>
       <div class="field"><label for="hero-name">Nome</label><input type="text" id="hero-name" maxlength="18" placeholder="Como seu herói se chama?" value="${esc(d.name)}" data-input="name" autocomplete="off"></div>
       <div class="field"><span class="lbl">Classe</span><div class="classes">${Object.values(D.CLASSES).map((k) => `<button class="cls" style="--cc:${k.color}" data-act="cls" data-v="${k.id}" aria-pressed="${d.cls === k.id}"><span class="cn">${k.name}</span><span class="cr">${k.role}</span><span class="cb">${k.blurb}</span></button>`).join('')}</div></div>
-      <div class="field"><label for="hero-bday">Aniversário <span class="muted small">(opcional)</span></label><input type="date" id="hero-bday" class="txt date-in" value="${esc(d.birth || '')}" max="${today()}" data-input="bday"><div class="small muted" style="margin-top:4px">No dia do aniversário, o herói ganha uma caixa de presente com bênção e moedas de festa.</div></div>
+      <div class="field"><label for="hero-bday">Aniversário <span class="muted small">(opcional)</span></label><input type="date" id="hero-bday" class="txt date-in" value="${esc(d.birth || '')}" max="${today()}" data-input="bday"><div class="small muted" style="margin-top:4px">No dia do aniversário, o herói ganha uma caixa de presente com bênção e moedas de festa.</div><div class="warn-note small" style="margin-top:6px">Confira a data: <b>depois de criar o herói, o aniversário não pode ser alterado.</b></div></div>
       ${lookControls(d.look)}
       <div class="row"><button class="btn primary" data-act="saveHero" ${d.name.trim() ? '' : 'disabled'}>Criar herói</button><button class="btn ghost" data-act="home">Cancelar</button>${d.name.trim() ? '' : '<span class="small muted">Escolha um nome para continuar.</span>'}</div></div></div>`;
   }
@@ -1138,6 +1275,7 @@
     return `<section class="hero-head"><div class="fig"><div class="idle">${A.heroSvg(h)}</div>${kudosStrip(h.id)}</div><div>
       <div class="eyebrow" style="color:${c.color}">${ancOf(h).name} · ${c.name} · ${c.role}</div><h2>${esc(h.name)}</h2>
       <div class="meta"><span class="chip">Nível <b class="num">${h.level}</b></span><span class="chip"><span class="coin"></span> <b class="num">${goldOf(h)}</b> ouro</span>${h.potion && h.potion.day === today() ? `<span class="chip warn">${esc((D.POTIONS.find((x) => x.id === h.potion.id) || {}).name || 'Poção')} esta noite</span>` : ''}${festaOf(h) ? `<span class="chip festa-chip"><span class="coin festa"></span> <b class="num">${festaOf(h)}</b> de festa</span>` : ''}<span class="chip"><span class="gem"></span> <b class="num">${redeemBal(h)}</b> XP de resgate</span>${streakNow(h) ? `<span class="chip streakchip"><b class="num">${streakNow(h)}</b> dia${streakNow(h) > 1 ? 's' : ''} seguido${streakNow(h) > 1 ? 's' : ''}</span>` : ''}${h.points ? `<span class="chip warn"><b class="num">${h.points}</b> ponto${h.points > 1 ? 's' : ''} de habilidade</span>` : ''}<span class="chip">Poder de combate <b class="num">${E.powerScore(E.heroStats(Object.assign({}, h, { bday: bdayBuffOn(h), potion: h.potion && h.potion.day === today() ? h.potion.id : null })))}</b></span></div>
+      ${kudosSummary(h)}
       <div class="xpline"><span>Experiência</span><span class="num"><b>${h.xp}</b> / ${need} para o nível ${h.level + 1}${h.xpDebt ? ` <span class="muted" title="XP de tarefas desfeitas depois que o nível já tinha subido. As próximas tarefas pagam primeiro.">· −${h.xpDebt} a repor</span>` : ''}</span></div><div class="bar"><i style="width:${Math.round((h.xp / need) * 100)}%"></i></div></div></section>
       <nav class="tabs" role="tablist">${tabs.map(([k, n]) => `<button role="tab" aria-selected="${S.tab === k}" data-act="tab" data-v="${k}">${n}${k === 'habilidades' && h.points ? `<span class="dot">${h.points}</span>` : ''}${k === 'recompensas' && rewardList().some((r) => r.cost <= redeemBal(h)) ? '<span class="dot">!</span>' : ''}</button>`).join('')}</nav>${body}`;
   }
@@ -1385,17 +1523,30 @@
           <div class="row"><button class="btn primary" type="submit">Adicionar obrigatória</button></div></form>
         ${choreList().length ? `<ul class="hist" style="margin-top:12px">${choreList().map((c) => `<li><span><b>${esc(c.title)}</b> <span class="small muted">· ${D.DIFF[c.diff].name} · ${freqTxt(Object.assign({ chore: true }, c))}${c.from && c.from > today() ? ' · a partir de ' + fmtDay(c.from) : ''}${c.due ? ' · até ' + c.due : ''} · ${esc(assignTxt(c))}</span></span><span class="row" style="gap:6px"><button class="btn sm ghost" data-act="editTask" data-scope="chore" data-id="${c.id}">Editar</button><button class="btn sm ghost" data-act="delChore" data-id="${c.id}">Remover</button></span></li>`).join('')}</ul>` : '<p class="small muted" style="margin:10px 0 0">Nenhuma tarefa obrigatória.</p>'}</section>
       </div><div>
+      <section class="card"><h3>Sala</h3>
+        <form class="room-cfg" data-form="roomcfg"><div class="field"><label for="room-rename">Nome da sala</label><input type="text" id="room-rename" class="txt" maxlength="40" value="${esc((S.roomMeta && S.roomMeta.name) || '')}"></div>
+          <div class="field"><label for="room-slots-cfg">Vagas de heróis</label><select id="room-slots-cfg" class="txt sel">${slotOpts(roomSlots(), Math.max(1, hs.length))}</select><div class="small muted" style="margin-top:4px">${hs.length} ocupada${hs.length === 1 ? '' : 's'}. Para ter menos vagas do que heróis, expulse alguém antes.</div></div>
+          <div class="row"><button class="btn sm primary" type="submit">Salvar nome e vagas</button></div></form>
+        <p class="small" style="margin:14px 0 10px">Código para a família entrar: <b class="code-big">${esc(S.room)}</b></p>
+        <div class="row">${canInvite() ? '<button class="btn sm primary" data-act="invite">Link de convite</button>' : ''}<button class="btn sm" data-act="copyCode">Copiar código</button>${hs.length ? '<button class="btn sm ghost" data-act="forceBattle">Prévia da batalha</button>' : ''}</div>
+        <p class="small muted" style="margin:8px 0 0">A prévia mostra como a batalha desta noite terminaria se fosse agora. Não dá recompensa nem muda o estágio.</p></section>
       ${requestsAdmin()}
       <section class="card">${rewardsAdmin(false)}</section>
       <section class="card"><div class="card-h"><h3>Co-criadores</h3><span class="small muted">Também abrem estas configurações.</span></div>
         ${(() => { const others = hs.filter((h) => h.id !== p.creatorId); const main = S.heroes[p.creatorId];
           return `<p class="small" style="margin:0 0 10px">${main ? `${roleTag(main)} <b>${esc(main.name)}</b>` : ''}</p>${others.length ? `<div class="co-list">${others.map((h) => { const on = isCoCreator(h.id); return `<label class="co-item${on ? ' on' : ''}"><input type="checkbox" data-act="toggleCo" value="${h.id}" ${on ? 'checked' : ''} ${isMainCreator() ? '' : 'disabled'}><span class="ic">${A.heroSvg(h, { noPet: true, noWeapon: true })}</span><span><b>${esc(h.name)}</b><br><span class="small muted">${D.CLASSES[h.cls].name}</span></span></label>`; }).join('')}</div>` : '<p class="small muted" style="margin:0">Quando outras pessoas criarem seus heróis na sala, elas aparecem aqui.</p>'}
           ${isMainCreator() ? '' : '<p class="small muted" style="margin:10px 0 0">Só quem criou a sala escolhe os co-criadores.</p>'}`; })()}</section>
+      ${Store.server ? `<section class="card"><div class="card-h"><h3>Personagens importados</h3></div>
+        <label class="check"><input type="checkbox" data-act="toggleImport" ${p.allowImport ? 'checked' : ''}> Permitir que tragam personagens de outras salas</label>
+        <p class="small muted" style="margin:6px 0 0">Quem tem conta pode trazer um herói que já tem em outra sala, com nível, habilidades e itens. Tarefas e ouro começam do zero aqui. ${p.allowImport ? '' : 'Desligado: todo mundo começa no nível 1.'}</p></section>` : ''}
+      ${(() => { const t = today(); const rows = [];
+        for (const h of hs) for (const x of h.tasks || []) if (x.done === t || x.pending) rows.push(`<li><span><b>${esc(h.name)}</b> · ${esc(x.title)}<br><span class="small muted">${x.pending ? 'aguardando aprovação' : `+${x.gain || 0} XP`}</span></span><button class="btn sm ghost" data-act="reopenTask" data-hero="${h.id}" data-id="${x.id}">Reabrir</button></li>`);
+        for (const b of boardList()) if (b.done === t || (b.parts || []).length) rows.push(`<li><span><b>${esc((b.partNames || []).join(' e ') || b.doneByName || '')}</b> · ${esc(b.title)} <span class="tag">Quadro</span><br><span class="small muted">${b.pending ? 'aguardando aprovação' : b.done ? `+${b.gain || 0} XP` : 'metade da dupla feita'}</span></span><button class="btn sm ghost" data-act="reopenBoard" data-id="${b.id}">Reabrir</button></li>`);
+        return `<section class="card"><div class="card-h"><h3>Feitas hoje</h3><span class="small muted">Reabrir tira o XP de quem cumpriu.</span></div>${rows.length ? `<ul class="approvals">${rows.join('')}</ul>` : '<p class="small muted" style="margin:0">Ninguém concluiu tarefas hoje ainda.</p>'}</section>`; })()}
+      <section class="card"><div class="card-h"><h3>Heróis da sala</h3><span class="small muted">${hs.length} de ${roomSlots()} vagas</span></div>
+        ${hs.length ? `<ul class="kick-list">${hs.map((h) => `<li><span class="ic">${A.heroSvg(h, { noPet: true, noWeapon: true })}</span><span><b>${esc(h.name)}</b> ${roleTag(h)}<br><span class="small muted">Nível ${h.level} · ${D.CLASSES[h.cls].name}${Store.server ? ` · ${h.owner ? (h.owner === myAcct() ? 'sua conta' : 'conta própria') : 'sem conta'}` : ''}</span></span>${h.id === p.creatorId || h.id === S.me ? '' : `<button class="btn sm ghost danger" data-act="askKick" data-id="${h.id}">Expulsar</button>`}</li>`).join('')}</ul>` : '<p class="small muted" style="margin:0">Ninguém ainda.</p>'}</section>
       <section class="card"><h3>PIN das configurações</h3><p class="small muted" style="margin:6px 0 10px">${p.pin ? 'As configurações pedem o PIN para abrir, para o criador e para os co-criadores.' : 'Sem PIN, qualquer pessoa que escolher o personagem de um criador abre as configurações.'}</p>
         ${isMainCreator() ? `<div class="row"><button class="btn sm" data-act="setPinAsk">${p.pin ? 'Trocar PIN' : 'Criar PIN'}</button>${p.pin ? '<button class="btn sm ghost" data-act="clearPin">Remover PIN</button>' : ''}</div>` : '<p class="small muted" style="margin:0">Só quem criou a sala troca o PIN. Os co-criadores usam o mesmo PIN.</p>'}</section>
-      <section class="card"><h3>Sala</h3><p class="small" style="margin:6px 0 10px">Código para a família entrar: <b class="code-big">${esc(S.room)}</b></p>
-        <div class="row">${canInvite() ? '<button class="btn sm primary" data-act="invite">Link de convite</button>' : ''}<button class="btn sm" data-act="copyCode">Copiar código</button>${hs.length ? '<button class="btn sm ghost" data-act="forceBattle">Prévia da batalha</button>' : ''}</div>
-        <p class="small muted" style="margin:8px 0 0">A prévia mostra como a batalha desta noite terminaria se fosse agora. Não dá recompensa nem muda o estágio.</p></section>
       </div></div>`;
   }
   function requestsAdmin() {
@@ -1460,7 +1611,7 @@
     const own = (h.cosmetics && h.cosmetics.owned) || [];
     return `<div class="grid2"><div class="card"><div class="card-h"><h3>Aparência</h3><button class="btn sm ghost" data-act="randLook">Sortear</button></div>
       <div class="field"><label for="rename">Nome</label><input type="text" id="rename" maxlength="18" value="${esc(h.name)}" data-input="rename" autocomplete="off" ${S.readOnly ? 'disabled' : ''}></div>
-      <div class="field"><label for="birth-edit">Aniversário</label><input type="date" id="birth-edit" class="txt date-in" value="${esc(h.birth || '')}" max="${today()}" ${S.readOnly ? 'disabled' : ''}><div class="small muted" style="margin-top:4px">O presente de aniversário pode ser aberto uma vez por ano.</div></div>${lookControls(h.look)}</div>
+      <div class="field"><span class="lbl">Aniversário</span>${h.birth ? `<div class="bday-fixed"><b class="num">${fmtBirth(h.birth)}</b> <span class="small muted">· definido, não pode ser alterado</span></div>` : `<input type="date" id="birth-edit" class="txt date-in" value="" max="${today()}" ${S.readOnly ? 'disabled' : ''} aria-describedby="birth-warn"><div class="warn-note small" id="birth-warn" style="margin-top:6px">Atenção: depois de salvo, o aniversário <b>não pode ser alterado</b>.</div>`}<div class="small muted" style="margin-top:4px">O presente de aniversário pode ser aberto uma vez por ano.</div></div>${lookControls(h.look)}</div>
       <div class="card"><div class="card-h"><h3>Itens de estilo</h3></div>${own.length ? Object.entries(D.COSMETIC_SLOTS).map(([slot, label]) => {
         const mine = D.COSMETICS.filter((x) => x.slot === slot && own.includes(x.id)); if (!mine.length) return '';
         return `<div class="field"><span class="lbl">${label}</span><div class="opts"><button class="opt" data-act="setCos" data-k="${slot}" data-v="" aria-pressed="${!h.cosmetics[slot]}">Nenhum</button>${mine.map((x) => `<button class="opt" data-act="setCos" data-k="${slot}" data-v="${x.id}" aria-pressed="${h.cosmetics[slot] === x.id}">${x.name}</button>`).join('')}</div></div>`;
@@ -1478,8 +1629,40 @@
     if (m.type === 'pickHero') {
       const t = S.board[m.taskId]; if (!t) return '';
       return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="pk-t" data-stop><div class="eyebrow">Missão da guilda</div><h3 id="pk-t">Quem cumpriu "${esc(t.title)}"?</h3>
-        <div class="picker">${heroList().filter((h) => canDoBoard(t, h.id)).map((h) => `<button class="pick" data-act="doneBoardAs" data-id="${h.id}"><span class="ic">${A.heroSvg(h, { noPet: true })}</span><span>${esc(h.name)}</span></button>`).join('')}</div>
+        <div class="picker">${heroList().filter((h) => canDoBoard(t, h.id) && canControl(h)).map((h) => `<button class="pick" data-act="doneBoardAs" data-id="${h.id}"><span class="ic">${A.heroSvg(h, { noPet: true })}</span><span>${esc(h.name)}</span></button>`).join('')}</div>
         <div class="row"><button class="btn ghost" data-act="closeModal">Cancelar</button></div></div></div>`;
+    }
+    if (m.type === 'recovery') {
+      return `<div class="modal-bg"><div class="modal recovery" role="dialog" aria-modal="true" aria-labelledby="rc-t" data-stop><div class="eyebrow">Guarde este código</div><h3 id="rc-t">Código de recuperação</h3>
+        <p class="small" style="margin:6px 0 12px">Se você esquecer a senha, é com o seu e-mail e este código que você cria uma senha nova. <b>Ele aparece só agora.</b> Anote num papel, guarde no gerenciador de senhas ou tire uma foto.</p>
+        <div class="rc-code num" id="rc-code">${esc(m.code)}</div>
+        <div class="row" style="margin-top:14px"><button class="btn" data-act="copyRecovery">Copiar</button><span class="spacer"></span><button class="btn primary" data-act="recoveryDone">Já guardei</button></div></div></div>`;
+    }
+    if (m.type === 'reopen') {
+      const t = m.kind === 'board' ? S.board[m.id] : ((S.heroes[m.hero] || {}).tasks || []).find((x) => x.id === m.id); if (!t) return '';
+      const who = m.kind === 'board' ? Array.from(new Set([t.doneBy].concat(t.parts || []).filter(Boolean))).map((id) => (S.heroes[id] ? S.heroes[id].name : '')).filter(Boolean).join(' e ') : (S.heroes[m.hero] || {}).name;
+      return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="ro-t" data-stop><div class="eyebrow">Reabrir tarefa</div><h3 id="ro-t">"${esc(t.title)}" volta a ficar pendente?</h3>
+        <p class="small" style="margin:6px 0 12px">A tarefa volta para a lista como não feita e <b>${esc(who || 'quem cumpriu')}</b> perde a experiência que ganhou com ela.</p>
+        <div class="row"><button class="btn primary" data-act="reopenOk">Reabrir</button><button class="btn ghost" data-act="closeModal">Cancelar</button></div></div></div>`;
+    }
+    if (m.type === 'bdayLock') {
+      return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="bl-t" data-stop><div class="eyebrow">Aniversário</div><h3 id="bl-t">Salvar ${fmtBirth(m.v)}?</h3>
+        <p class="small" style="margin:6px 0 12px">Depois de salvo, o aniversário <b>não pode ser alterado</b>. Confira o dia, o mês e o ano.</p>
+        <div class="row"><button class="btn primary" data-act="bdaySave">Salvar aniversário</button><button class="btn ghost" data-act="closeModal">Corrigir</button></div></div></div>`;
+    }
+    if (m.type === 'kick') {
+      const h = S.heroes[m.heroId]; if (!h) return '';
+      return `<div class="modal-bg" data-act="closeModal"><form class="modal kick" role="dialog" aria-modal="true" aria-labelledby="kk-t" data-stop data-form="kick"><div class="eyebrow">Expulsar da sala</div><h3 id="kk-t">Expulsar ${esc(h.name)}?</h3>
+        <div class="warn-note small"><b>${esc(h.name)}</b> será retirado da sala, junto com nível, habilidades, itens e tarefas desta sala. Isso não pode ser desfeito. Se a pessoa voltar, terá que criar um herói novo (ou trazer de outra sala, se permitido).</div>
+        <div class="field" style="margin-top:12px"><label for="kick-in">Para confirmar, escreva <b>EXPULSAR</b></label><input type="text" id="kick-in" class="txt" autocomplete="off" autocapitalize="characters" spellcheck="false"></div>
+        ${m.err ? `<p class="small" style="color:var(--bad);margin-top:-6px">${esc(m.err)}</p>` : ''}
+        <div class="row"><button class="btn danger" type="submit">Expulsar</button><button class="btn ghost" type="button" data-act="closeModal">Cancelar</button></div></form></div>`;
+    }
+    if (m.type === 'claim') {
+      const h = S.heroes[m.heroId]; if (!h) return '';
+      return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="cl-t" data-stop><div class="eyebrow">Personagem sem conta</div><h3 id="cl-t">${esc(h.name)} é seu?</h3>
+        <p class="small" style="margin:6px 0 12px">Este personagem foi criado antes das contas. Se ele é seu, ligue-o à sua conta: depois disso, só você e o organizador da sala jogam com ele.</p>
+        <div class="row"><button class="btn primary" data-act="claimHero">Sim, é meu</button><button class="btn ghost" data-act="closeModal">Não é meu</button></div></div></div>`;
     }
     if (m.type === 'invite') {
       const url = inviteUrl(); const msg = inviteText() + ' ' + url;
@@ -1487,7 +1670,7 @@
         <p class="small muted" style="margin:6px 0 12px">Quem abrir o link entra direto na sala e cria o seu herói. Sem digitar código.</p>
         <div class="invite-link"><input type="text" id="invite-url" readonly value="${esc(url)}" aria-label="Link de convite"><button class="btn primary" data-act="copyInvite">${m.copied ? 'Copiado!' : 'Copiar'}</button></div>
         <div class="row" style="margin-top:12px">${navigator.share ? '<button class="btn" data-act="shareInvite">Compartilhar…</button>' : ''}<a class="btn" href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">Enviar no WhatsApp</a><span class="spacer"></span><button class="btn ghost" data-act="closeModal">Fechar</button></div>
-        <p class="small muted" style="margin:12px 0 0">A guilda tem ${heroList().length} de ${D.MAX_HEROES} vagas ocupadas. Código da sala: <b class="num">${esc(S.room)}</b></p></div></div>`;
+        <p class="small muted" style="margin:12px 0 0">A guilda tem ${heroList().length} de ${roomSlots()} vagas ocupadas. Código da sala: <b class="num">${esc(S.room)}</b></p></div></div>`;
     }
     if (m.type === 'pin') {
       return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="pin-t" data-stop><h3 id="pin-t">${m.mode === 'set' ? 'Criar PIN do mestre' : 'PIN do mestre'}</h3>
@@ -1526,7 +1709,7 @@
       const msgs = ['Mandou bem!', 'Obrigado pela ajuda!', 'Que capricho!', 'Você é demais!', 'Orgulho da guilda!'];
       const emo = m.emo || '⭐';
       return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="kd-t" data-stop><div class="eyebrow">Elogio</div><h3 id="kd-t">Elogiar ${esc(to.name)}</h3>
-        <p class="small muted">${esc(to.name)} ganha ${D.KUDOS_XP} XP. Você pode dar ${D.KUDOS_PER_DAY} elogios por dia, um para cada pessoa.</p>
+        <p class="small muted">${esc(to.name)} ganha ${D.KUDOS_XP} XP. Você pode dar ${D.KUDOS_PER_DAY} elogios por dia (um para cada pessoa). Hoje ainda restam ${kudosLeftN()}. Amanhã tem mais.</p>
         <div class="lbl" style="margin-top:6px">1. Escolha um emoji</div><div class="emo-pick">${KUDOS_EMO.map((x) => `<button class="emo" data-act="kudosEmo" data-v="${x}" aria-pressed="${emo === x}" aria-label="Emoji ${x}">${x}</button>`).join('')}</div>
         <div class="lbl">2. Escolha a mensagem</div><div class="opts" style="margin:6px 0 14px">${msgs.map((x) => `<button class="opt" data-act="sendKudos" data-v="${esc(x)}">${emo} ${esc(x)}</button>`).join('')}</div>
         <button class="btn ghost" data-act="closeModal">Cancelar</button></div></div>`;
@@ -1567,8 +1750,8 @@
   /* ----- Reprodução da batalha: cena estilo jogo idle ----- */
   let replayTimer = null;
   // posições (x %, pé em y %, escala), da frente para trás
-  const SLOTS = [[38, 80, 1], [27, 96, 1.07], [29, 62, 0.9], [16, 86, 1.02], [10, 66, 0.9]];
-  const FOE_SLOTS = SLOTS.map(([x, y, sc]) => [100 - x, y, sc * 1.12]);
+  const SLOTS = [[38, 80, 1], [27, 96, 1.07], [29, 62, 0.9], [16, 86, 1.02], [10, 66, 0.9], [5, 94, 1.02]];
+  const FOE_SLOTS = SLOTS.slice(0, 5).map(([x, y, sc]) => [100 - x, y, sc * 1.12]);
   function openReplay(battle, practice) { clearTimeout(replayTimer); S.modal = { type: 'replay', battle, practice, step: 0, speed: 1, hp: {}, finished: false, mounted: false, key: uidGen() }; render(); Sound.music(true); }
   function layoutUnits(b) {
     const hs = b.units.filter((u) => u.side === 'h').slice().sort((a, c) => ((D.CLASSES[c.cls] || {}).aggro || 1) - ((D.CLASSES[a.cls] || {}).aggro || 1));
@@ -1851,8 +2034,22 @@
   function hero() { return S.heroes[S.heroId]; }
   function saveCur(h) { Store.saveHero(h); render(); }
   const actions = {
+    navToggle() { S.navOpen = !S.navOpen; render(); },
+    navGo(el) {
+      const v = el.dataset.v; S.navOpen = false;
+      if (v.startsWith('tab:')) { if (!S.me) return render(); S.heroId = S.me; S.view = 'hero'; S.tab = v.slice(4); S.selSkill = null; tidyAll(); render(); scrollTo(0, 0); return; }
+      const map = { home: 'home', bestiary: 'bestiary', replay: 'replay', settings: 'settings', report: 'report', invite: 'invite', tutorial: 'tutorial', switchHero: 'switchHero', leaveRoom: 'leaveRoom', logout: 'logout' };
+      const fn = actions[map[v]]; if (fn) fn.call(actions, el); else render();
+    },
     home() { S.view = S.me ? 'home' : 'select'; S.heroId = null; S.diffPreview = null; render(); scrollTo(0, 0); },
-    pickMe(el) { S.toast = null; S.me = el.dataset.id; lsSet('guilda-me:' + S.room, S.me); S.masterOk = false; Acct.room(S.me); S.view = 'home'; tidyAll(); render(); scrollTo(0, 0); maybeShowReport(); processInbox(); },
+    pickMe(el) {
+      const h = S.heroes[el.dataset.id]; if (!h) return;
+      if (Store.server && S.acct && h.owner !== myAcct()) {
+        if (!h.owner && !orgAcct()) { S.modal = { type: 'claim', heroId: h.id }; render(); return; }
+        if (!orgAcct()) { showToast(`<span><b>${esc(h.name)}</b> é de outra pessoa. Só o dono e o organizador jogam com ele.</span>`); return; }
+      }
+      chooseHero(h.id);
+    },
     switchHero() { S.toast = null; S.me = null; lsSet('guilda-me:' + S.room, null); S.masterOk = false; S.view = 'select'; render(); scrollTo(0, 0); },
     leaveRoom() { Store.close(); S.me = null; S.roomMeta = null; S.masterOk = false; applyDocs({}); S.view = 'rooms'; S.roomErr = ''; render(); scrollTo(0, 0); },
     joinLast() { enterRoom(lsGet('guilda-last-room', '')); },
@@ -1890,16 +2087,58 @@
       post('undo', `${h.name} desfez a missão "${t.title}"`);
       showToast(`<span>Missão desfeita · <b>${esc(t.title)}</b>${gain ? ` · −${gain} XP` : ''}</span>`); render();
     },
+    reopenBoard(el) { const t = S.board[el.dataset.id]; if (!t || !isCreator() || S.readOnly) return; S.modal = { type: 'reopen', kind: 'board', id: t.id }; render(); },
+    reopenTask(el) { if (!isCreator()) return; S.modal = { type: 'reopen', kind: 'task', id: el.dataset.id, hero: el.dataset.hero }; render(); },
+    reopenOk() {
+      const m = S.modal; S.modal = null; if (!m || !isCreator()) return render();
+      if (m.kind === 'board') {
+        const t = S.board[m.id]; if (!t) return render();
+        const who = Array.from(new Set([t.doneBy].concat(t.parts || []).filter(Boolean)));
+        who.forEach((hid) => { const i = (t.parts || []).indexOf(hid); const xp = t.duo ? ((t.partGains || [])[i] || 0) : t.gain || 0; sendInbox(hid, 'revoke', { ref: { type: 'board', id: t.id }, xp, pending: !!t.pending, diff: t.duo ? null : t.diff, title: t.title }); });
+        Store.setDoc('board/' + t.id, Object.assign(clone(t), { done: null, doneBy: null, doneByName: null, gain: 0, pending: null, approved: null, punct: null, parts: [], partNames: [], partGains: [] }));
+        post('undo', `${S.heroes[S.me].name} reabriu a missão "${t.title}"`);
+        showToast(`<span>Missão reaberta · <b>${esc(t.title)}</b>. O XP sai de quem cumpriu quando a pessoa abrir o app.</span>`);
+      } else {
+        const h = S.heroes[m.hero]; const t = h && (h.tasks || []).find((x) => x.id === m.id); if (!t) return render();
+        sendInbox(h.id, 'revoke', { ref: { type: 'task', id: t.id }, title: t.title });
+        post('undo', `${S.heroes[S.me].name} reabriu "${t.title}" de ${h.name}`);
+        showToast(`<span>Tarefa de <b>${esc(h.name)}</b> reaberta. O XP sai quando a pessoa abrir o app.</span>`);
+      }
+      render(); processInbox();
+    },
     boardFilter(el) { S.boardFilter = el.dataset.v || null; render(); },
     toggleBoardLater() { S.showBoardLater = !S.showBoardLater; },
     goRoom(el) { if (el.dataset.code === S.room && S.view !== 'rooms') return; enterRoom(el.dataset.code); },
     forgetRoom(el) { Acct.forget(el.dataset.code); },
     register() { const e = document.getElementById('acct-email'), p = document.getElementById('acct-pass'); if (!e.value.trim()) { e.focus(); return; } if (!p.value) { p.focus(); return; } Acct.enter('register', e.value, p.value); },
     logout() { Acct.logout(); },
+    authMode(el) { S.authMode = el.dataset.v; S.authErr = ''; render(); },
+    newRecovery() { Acct.newRecovery(); },
+    copyRecovery() { const c = S.modal && S.modal.code; if (!c) return; try { navigator.clipboard.writeText(c).then(() => showToast('Código copiado. Guarde num lugar seguro.'), () => {}); } catch (e) { /* ok */ } },
+    recoveryDone() { S.modal = null; render(); },
+    claimHero() {
+      const h = S.modal && S.heroes[S.modal.heroId]; S.modal = null; if (!h || h.owner) { render(); return; }
+      h.owner = myAcct(); Store.saveHero(h); post('claim', `${h.name} foi ligado a uma conta`);
+      chooseHero(h.id); showToast(`<span><b>${esc(h.name)}</b> agora é seu. Só você e o organizador jogam com ele.</span>`);
+    },
+    async importHero(el) {
+      if (!canCreateHero()) { showToast('Não há vaga para mais um personagem seu.'); return; }
+      if (!(S.party && S.party.allowImport)) { showToast('O organizador não permite personagens importados.'); return; }
+      let src = null; try { src = (await serverCall('api_hero', el.dataset.code, el.dataset.id)).hero; } catch (e) { src = null; }
+      if (!src) { showToast('Não encontramos esse personagem na outra sala.'); return; }
+      if (src.owner !== myAcct()) { showToast('Só dá para trazer personagens ligados à sua conta.'); return; }
+      const h = importedHero(src, el.dataset.code);
+      if (S.party && S.party.last) h.seenBattle = S.party.last.id;
+      Store.saveHero(h); post('import', `${h.name} chegou de outra sala (nível ${h.level})`);
+      chooseHero(h.id); showToast(`<span><b>${esc(h.name)}</b> chegou à guilda com nível ${h.level}!</span>`);
+    },
     showLogin() { S.passOpen = !S.passOpen; S.authErr = ''; render(); },
     settings() { if (!isCreator()) return; S.view = 'settings'; S.diffPreview = null; S.pinErr = ''; render(); scrollTo(0, 0); },
     choreWho(el) { S.choreAssign = el.value; render(); },
     delChore(el) { if (masterLocked()) return; Store.delDoc('chores/' + el.dataset.id); render(); },
+    bdaySave() { const m = S.modal; const h = hero(); S.modal = null; if (h && m && !h.birth && /^\d{4}-\d{2}-\d{2}$/.test(m.v)) { h.birth = m.v; saveCur(h); showToast('Aniversário salvo.'); } render(); },
+    toggleImport(el) { if (masterLocked()) { render(); return; } const p = clone(S.party || newParty()); p.allowImport = !!el.checked; Store.saveParty(p); showToast(p.allowImport ? 'Personagens importados permitidos.' : 'Personagens importados não são mais aceitos.'); render(); },
+    askKick(el) { if (masterLocked()) return; const h = S.heroes[el.dataset.id]; if (!h) return; S.modal = { type: 'kick', heroId: h.id }; render(); setTimeout(() => { const i = document.getElementById('kick-in'); if (i) i.focus(); }, 30); },
     invite() { if (!canInvite()) return; S.modal = { type: 'invite' }; render(); },
     copyInvite() {
       const url = inviteUrl(); const ok = () => { if (S.modal && S.modal.type === 'invite') { S.modal.copied = true; render(); } showToast('Link de convite copiado.'); };
@@ -1908,7 +2147,7 @@
     },
     shareInvite() { const url = inviteUrl(); try { navigator.share({ title: (S.roomMeta && S.roomMeta.name) || 'Guilda da Família', text: inviteText(), url }).catch(() => {}); } catch (e) { /* sem compartilhar */ } },
     copyCode() { const c = S.room; try { navigator.clipboard.writeText(c).then(() => showToast(`Código <b>${c}</b> copiado.`), () => showToast(`Código da sala: <b>${c}</b>`)); } catch (e) { showToast(`Código da sala: <b>${c}</b>`); } },
-    create() { if (heroList().length >= D.MAX_HEROES) return; S.draft = { name: '', cls: 'guerreiro', look: randomLook('humano') }; S.view = 'create'; render(); scrollTo(0, 0); },
+    create() { if (!canCreateHero()) return; S.draft = { name: '', cls: 'guerreiro', look: randomLook('humano') }; S.view = 'create'; render(); scrollTo(0, 0); },
     open(el) { if (el.dataset.id !== S.me) return; S.heroId = el.dataset.id; S.view = 'hero'; S.tab = 'tarefas'; S.selSkill = null; tidyAll(); render(); scrollTo(0, 0); },
     cls(el) { S.draft.cls = el.dataset.v; render(); },
     look(el) {
@@ -1919,8 +2158,8 @@
     },
     randLook() { if (S.view === 'create') { S.draft.look = randomLook(S.draft.look.anc); render(); } else { const h = hero(); if (S.readOnly) return; h.look = randomLook(h.look.anc); saveCur(h); } },
     saveHero() {
-      if (!S.draft.name.trim() || heroList().length >= D.MAX_HEROES) return;
-      const h = newHero(S.draft);
+      if (!S.draft.name.trim() || heroList().length >= roomSlots()) return;
+      const h = newHero(S.draft); if (Store.server && S.acct) h.owner = myAcct();
       if (S.party && S.party.last) h.seenBattle = S.party.last.id; // herói novo não precisa rever batalhas antigas
       Store.saveHero(h);
       const p = clone(S.party || newParty());
@@ -2115,7 +2354,7 @@
     pickBoard(el) { if (!heroList().length) { showToast('Crie um herói primeiro para cumprir missões.'); return; } S.modal = { type: 'pickHero', taskId: el.dataset.id }; render(); },
     doneBoard(el) { if (!S.me) return; completeBoard(el.dataset.id, S.me); },
     
-    doneBoardAs(el) { const tid = S.modal.taskId; S.modal = null; render(); completeBoard(tid, el.dataset.id); },
+    doneBoardAs(el) { const tid = S.modal.taskId; S.modal = null; render(); if (!canControl(S.heroes[el.dataset.id])) return; completeBoard(tid, el.dataset.id); },
     delBoard(el) { Store.delDoc('board/' + el.dataset.id); render(); },
     askPin() { actions.settings(); },
     toggleCo(el) {
@@ -2134,6 +2373,7 @@
   };
 
   document.addEventListener('click', (ev) => {
+    if (S.navOpen && !ev.target.closest('.navmenu')) { S.navOpen = false; render(); }
     const el = ev.target.closest('[data-act]'); if (!el) return;
     const a = el.dataset.act;
     if (a === 'closeModal' && el.classList.contains('modal-bg') && ev.target !== el) return;
@@ -2157,7 +2397,7 @@
     if (el.dataset.input === 'rename') { const h = hero(); const v = el.value.trim(); if (!v) return; h.name = v; clearTimeout(renameTimer); renameTimer = setTimeout(() => Store.saveHero(h), 700); }
   });
   document.addEventListener('change', (ev) => {
-    if (ev.target.id === 'birth-edit' && !S.readOnly) { const h = hero(); const v = ev.target.value; if (h && (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v)) && v <= today()) { h.birth = v || null; saveCur(h); } }
+    if (ev.target.id === 'birth-edit' && !S.readOnly) { const h = hero(); const v = ev.target.value; if (h && !h.birth && /^\d{4}-\d{2}-\d{2}$/.test(v) && v <= today()) { S.modal = { type: 'bdayLock', v }; render(); } }
     if (ev.target.id === 'room-switch' && ev.target.value && ev.target.value !== S.room) { enterRoom(ev.target.value); return; }
     if (ev.target.id === 'new-every') S.newEvery = ev.target.value;
     if (ev.target.id === 'new-dom') S.newDom = ev.target.value;
@@ -2189,8 +2429,28 @@
       Acct.call('pass', S.acct.token, o, n).then((r) => { Acct.keep(r); S.passOpen = false; render(); showToast('Senha trocada. Os outros aparelhos vão pedir login de novo.'); }).catch((e) => { S.authErr = String(e.message || e); render(); });
       return;
     }
-    if (form === 'newroom') { createRoom(document.getElementById('room-name').value.trim() || 'Guilda da Família'); return; }
+    if (form === 'newroom') { if (needAcct()) return; createRoom(document.getElementById('room-name').value.trim() || 'Guilda da Família', Number((document.getElementById('room-slots') || {}).value) || 5); return; }
+    if (form === 'reset') {
+      const e = document.getElementById('acct-email'), rc = document.getElementById('acct-rc'), pw = document.getElementById('acct-pass');
+      if (!e.value.trim()) { e.focus(); return; } if (!rc.value.trim()) { rc.focus(); return; } if (!pw.value) { pw.focus(); return; }
+      Acct.enter('reset', e.value, pw.value, rc.value); return;
+    }
     if (S.readOnly) return;
+    if (form === 'roomcfg') {
+      if (masterLocked()) return;
+      const name = document.getElementById('room-rename').value.trim(); const slots = Number(document.getElementById('room-slots-cfg').value) || roomSlots();
+      if (!name) { showToast('Dê um nome para a sala.'); return; }
+      const before = (S.roomMeta && S.roomMeta.name) || '';
+      Store.setMeta({ name, slots }).then(() => { Acct.room(); if (name !== before) post('cfg', `A sala agora se chama "${name}"`); showToast(`<span>Sala <b>${esc(name)}</b> · ${slots} vaga${slots === 1 ? '' : 's'}.</span>`); render(); })
+        .catch((e) => showToast(esc(String(e.message || e))));
+      return;
+    }
+    if (form === 'kick') {
+      const m = S.modal; if (!m || m.type !== 'kick' || masterLocked()) return;
+      const v = (document.getElementById('kick-in').value || '').trim();
+      if (v !== 'EXPULSAR') { m.err = 'Escreva EXPULSAR (em letras maiúsculas) para confirmar.'; render(); return; }
+      kickHero(m.heroId); return;
+    }
     if (form === 'xpcfg') {
       if (masterLocked()) return;
       const cap = Math.max(0, Math.min(5000, Math.round(Number(document.getElementById('cap-in').value) || 0)));
@@ -2234,9 +2494,23 @@
     const nt = h.tasks[h.tasks.length - 1]; if (!visibleToday(nt)) { const n = nt.repeat ? nextOn(nt, dueDay(nt)) : dueDay(nt); showToast(`<span>Tarefa criada. Aparece ${n ? `${D.WEEKDAYS[dowOf(n)].toLowerCase()}, ${fmtDay(n)}` : 'nos dias marcados'}.</span>`); }
     inp.value = ''; clearInput(inp.id); S.newDue = ''; saveCur(h); document.getElementById('task-title').focus();
   });
+  function kickHero(id) {
+    const h = S.heroes[id]; if (!h) return;
+    const p = clone(S.party || newParty());
+    if (p.creatorId === id) { showToast('O criador da sala não pode ser expulso.'); return; }
+    p.coCreators = (p.coCreators || []).filter((x) => x !== id);
+    if (p.approval && p.approval.heroes) p.approval.heroes = p.approval.heroes.filter((x) => x !== id);
+    Store.saveParty(p);
+    for (const b of boardList()) if ((b.who || []).includes(id)) { const nb = clone(b); nb.who = nb.who.filter((x) => x !== id); if (!nb.who.length) nb.who = null; Store.setDoc('board/' + b.id, nb); }
+    for (const c of choreList()) if (Array.isArray(c.assign) && c.assign.includes(id)) { const nc = clone(c); nc.assign = nc.assign.filter((x) => x !== id); Store.setDoc('chores/' + c.id, nc); }
+    Store.delDoc('heroes/' + id);
+    post('kick', `${h.name} foi retirado da sala`);
+    S.modal = null; render(); showToast(`<span><b>${esc(h.name)}</b> foi retirado da sala.</span>`);
+  }
   async function enterRoom(code) {
     code = normCode(code); S.roomErr = '';
     if (code.length !== 6) { S.roomErr = 'O código tem 6 letras e números.'; render(); return; }
+    if (needAcct()) { S.pendingInvite = code; sessSet('guilda-invite', code); S.view = 'rooms'; render(); return; }
     S.busy = true; render();
     let meta = null;
     try { meta = await Store.roomMeta(code); } catch (e) { S.busy = false; S.roomErr = 'Não deu para conferir a sala agora. Tente de novo.'; render(); return; }
@@ -2247,18 +2521,20 @@
     lsSet('guilda-last-room', code);
     let me = lsGet('guilda-me:' + code, null);
     if (!(me && S.heroes[me])) { const am = Acct.heroIn(code); if (am && S.heroes[am]) { me = am; lsSet('guilda-me:' + code, am); } }
+    if (me && S.heroes[me] && !canControl(S.heroes[me])) me = null; // personagem de outra pessoa: escolha de novo
+    if (!(me && S.heroes[me]) && Store.server && S.acct) { const mine = heroList().filter((h) => h.owner === myAcct()); if (mine.length === 1) me = mine[0].id; }
     S.me = me && S.heroes[me] ? me : null; S.masterOk = false;
     Acct.room();
     S.view = S.me ? 'home' : 'select';
     tidyAll(); render(); scrollTo(0, 0);
     await resolveDay(false); maybeShowReport(); processInbox();
   }
-  async function createRoom(name) {
+  async function createRoom(name, slots) {
     S.busy = true; render();
     for (let i = 0; i < 6; i++) {
       const code = newCode();
       let ok = false;
-      try { ok = await Store.createRoom(code, { code, name, createdAt: Date.now() }, newParty()); } catch (e) { console.warn(e); }
+      try { ok = await Store.createRoom(code, { code, name, slots: Math.max(1, Math.min(MAX_SLOTS, slots || 5)), createdAt: Date.now() }, newParty()); } catch (e) { console.warn(e); if (/\(login\)/.test(String(e.message))) { S.busy = false; Acct.expired(); return; } }
       if (ok) { S.busy = false; showToast(`Sala criada! Código: <b>${code}</b>`); return enterRoom(code); }
     }
     S.busy = false; S.roomErr = 'Não deu para criar a sala agora. Tente de novo.'; render();
@@ -2337,7 +2613,7 @@
     S.modal = null; render(); showToast('Tarefa atualizada.');
   }
 
-  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && S.tut) { endTut(); return; } if (ev.key === 'Escape' && S.modal) { clearTimeout(replayTimer); Sound.music(false); S.modal = null; render(); } });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && S.tut) { endTut(); return; } if (ev.key === 'Escape' && S.modal && S.modal.type !== 'recovery') { clearTimeout(replayTimer); Sound.music(false); S.modal = null; render(); } });
   window.addEventListener('resize', () => { if (S.view === 'hero' && S.tab === 'habilidades') drawLinks(); });
 
   // virada do dia e contagem regressiva
@@ -2358,8 +2634,10 @@
     const inv = Store.server ? inviteParam() : null;
     if (inv) {
       try { history.replaceState(null, '', location.pathname); } catch (e) { /* ok */ }
+      if (needAcct()) { S.pendingInvite = inv; sessSet('guilda-invite', inv); S.view = 'rooms'; render(); return; }
       S.invited = inv; await enterRoom(inv); return;
     }
+    if (needAcct()) { S.view = 'rooms'; render(); return; }
     const room = (snap && snap.room) || lsGet('guilda-last-room', null);
     if (room) {
       await enterRoom(room);

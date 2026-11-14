@@ -22,6 +22,10 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 });
 const code = (c) => { const s = String(c || '').toUpperCase(); if (!CODE_RE.test(s)) throw new Error('código de sala inválido'); return s; };
 const split = (path) => { const m = PATH_RE.exec(String(path)); if (!m) throw new Error('caminho inválido'); return [m[1], m[2]]; };
+const MAX_SLOTS = 6, MIN_SLOTS = 1;
+const slotsOf = (v) => Math.max(MIN_SLOTS, Math.min(MAX_SLOTS, Math.round(Number(v) || 5)));
+// campos de configuração da sala que só o organizador (criador ou co-criador) pode mudar
+const CFG_FIELDS = ['creatorId', 'coCreators', 'pin', 'xpCap', 'mvpGold', 'allowImport', 'approval', 'diffMul', 'slots', 'name'];
 const sized = (data) => { if (JSON.stringify(data ?? null).length > MAX_DOC) throw new Error('documento grande demais (too_large)'); return data; };
 
 /** Uma sala da guilda: guarda meta, revisão e os documentos (heroes/…, party/main, board/…). */
@@ -33,11 +37,12 @@ export class Room extends DurableObject {
     for (const [k, v] of await this.ctx.storage.list({ prefix: 'd:' })) out[k.slice(2)] = v;
     return out;
   }
-  async out(room, extra) { return Object.assign({ room, rev: await this.rev(), docs: await this.docs() }, extra || {}); }
+  async out(room, extra) { return Object.assign({ room, rev: await this.rev(), meta: await this.meta(), docs: await this.docs() }, extra || {}); }
 
   async meta() { return (await this.ctx.storage.get('meta')) || null; }
-  async create(room, meta, party) {
+  async create(room, meta, party, acct) {
     if (await this.ctx.storage.get('meta')) return { ok: false };
+    meta = Object.assign({}, meta, { slots: slotsOf(meta && meta.slots), name: String((meta && meta.name) || 'Guilda da Família').slice(0, 40), owner: acct || null });
     await this.ctx.storage.put({ meta, 'd:party/main': party });
     await this.bump();
     return { ok: true };
@@ -45,17 +50,57 @@ export class Room extends DurableObject {
   async get(room, clientRev) {
     const r = await this.rev();
     if (clientRev === r && r > 0) return { room, rev: r };
-    return { room, rev: r, docs: await this.docs() };
+    return { room, rev: r, meta: await this.meta(), docs: await this.docs() };
   }
-  async set(room, rel, data) {
-    if (!(await this.ctx.storage.get('meta'))) throw new Error('sala não existe');
+  /** Um único herói (para importar para outra sala). */
+  async hero(id) { return (await this.ctx.storage.get('d:heroes/' + id)) || null; }
+  /** O organizador é quem joga com o criador da sala ou com um co-criador (ou quem criou a sala, antes do 1º herói). */
+  async isOrg(acct) {
+    if (!acct) return false;
+    const party = (await this.ctx.storage.get('d:party/main')) || {};
+    const ids = [party.creatorId].concat(party.coCreators || []).filter(Boolean);
+    if (!ids.length) { const m = await this.meta(); return !m || !m.owner || m.owner === acct; }
+    for (const id of ids) { const h = await this.ctx.storage.get('d:heroes/' + id); if (h && h.owner === acct) return true; }
+    return false;
+  }
+  async set(room, rel, data, acct) {
+    const meta = await this.meta(); if (!meta) throw new Error('sala não existe');
+    const prev = await this.ctx.storage.get('d:' + rel);
+    if (rel.startsWith('heroes/')) {
+      if (prev && prev.owner && prev.owner !== acct && !(await this.isOrg(acct))) throw new Error('Esse personagem é de outra pessoa.');
+      if (!prev) {
+        const n = [...(await this.ctx.storage.list({ prefix: 'd:heroes/' })).keys()].length;
+        if (n >= slotsOf(meta.slots)) throw new Error('A sala está cheia.');
+      }
+      // o dono nunca muda por escrita de outra pessoa; um herói sem dono só passa a ter dono quando o próprio jogador o assume
+      data.owner = prev ? (prev.owner || (data.owner === acct ? acct : null)) : acct;
+    } else if (rel === 'party/main' && prev && prev.creatorId && !(await this.isOrg(acct))) {
+      for (const k of CFG_FIELDS) { if (k in prev) data[k] = prev[k]; else delete data[k]; }
+    }
     await this.ctx.storage.put('d:' + rel, data);
     await this.bump();
     return this.out(room);
   }
-  async del(room, rel) {
+  async del(room, rel, acct) {
+    if (rel.startsWith('heroes/')) {
+      const prev = await this.ctx.storage.get('d:' + rel);
+      if (prev && prev.owner && prev.owner !== acct && !(await this.isOrg(acct))) throw new Error('Só o organizador pode tirar o personagem de outra pessoa.');
+    }
     await this.ctx.storage.delete('d:' + rel);
     await this.bump();
+    return this.out(room);
+  }
+  /** Muda o nome ou as vagas da sala (só o organizador). */
+  async setMeta(room, patch, acct) {
+    const meta = await this.meta(); if (!meta) throw new Error('sala não existe');
+    if (!(await this.isOrg(acct))) throw new Error('Só o organizador muda a sala.');
+    if (patch.name != null) { const n = String(patch.name).trim().slice(0, 40); if (!n) throw new Error('Dê um nome para a sala.'); meta.name = n; }
+    if (patch.slots != null) {
+      const n = [...(await this.ctx.storage.list({ prefix: 'd:heroes/' })).keys()].length; const v = slotsOf(patch.slots);
+      if (v < n) throw new Error(`A sala já tem ${n} heróis. Para diminuir as vagas, expulse alguém antes.`);
+      meta.slots = v;
+    }
+    await this.ctx.storage.put('meta', meta); await this.bump();
     return this.out(room);
   }
   /** Marca uma missão como cumprida apenas se ninguém a cumpriu antes. */
@@ -98,7 +143,7 @@ const checkPass = (p) => { p = String(p || ''); if (p.length < 6) throw new Erro
 
 export class Account extends DurableObject {
   async data() { return (await this.ctx.storage.get('acct')) || null; }
-  view(a) { return { email: a.email, rooms: a.rooms || [] }; }
+  view(a) { return { email: a.email, id: a.id, rooms: a.rooms || [], hasRecovery: !!a.rch }; }
   async newSession(a) {
     const rnd = randHex(24); a.sessions = (a.sessions || []).concat({ h: await sha(rnd), at: Date.now() }).slice(-10);
     await this.ctx.storage.put('acct', a);
@@ -107,8 +152,28 @@ export class Account extends DurableObject {
   async register(email, pass) {
     if (await this.data()) throw new Error('Já existe uma conta com esse e-mail. Use Entrar.');
     const salt = randHex(16);
-    const a = { email, salt, hash: await pbkdf2(pass, salt), rooms: [], sessions: [], createdAt: Date.now() };
-    return this.newSession(a);
+    const rc = newRecovery();
+    const a = { email, id: await acctId(email), salt, hash: await pbkdf2(pass, salt), rch: await sha(normRec(rc)), rooms: [], sessions: [], createdAt: Date.now() };
+    return Object.assign(await this.newSession(a), { recovery: rc });
+  }
+  /** Gera um código de recuperação novo (o antigo deixa de valer). */
+  async newRecovery(rnd) {
+    const a = await this.auth(rnd); if (!a) throw new Error('sessão expirada');
+    const rc = newRecovery(); a.rch = await sha(normRec(rc)); await this.ctx.storage.put('acct', a);
+    return Object.assign(this.view(a), { recovery: rc });
+  }
+  /** Esqueci a senha: com o código de recuperação, cria uma senha nova. O código é trocado por outro. */
+  async reset(rc, newPass) {
+    const a = await this.data(); const now = Date.now();
+    if (!a || !a.rch) throw new Error('E-mail ou código de recuperação incorretos.');
+    if (a.lockUntil && a.lockUntil > now) throw new Error('Muitas tentativas. Espere um minuto e tente de novo.');
+    if (!sameStr(await sha(normRec(rc)), a.rch)) {
+      a.fails = (a.fails || 0) + 1; if (a.fails >= 5) { a.fails = 0; a.lockUntil = now + 60000; }
+      await this.ctx.storage.put('acct', a); throw new Error('E-mail ou código de recuperação incorretos.');
+    }
+    const next = newRecovery();
+    a.fails = 0; a.lockUntil = 0; a.salt = randHex(16); a.hash = await pbkdf2(newPass, a.salt); a.sessions = []; a.rch = await sha(normRec(next));
+    return Object.assign(await this.newSession(a), { recovery: next });
   }
   async login(email, pass) {
     const a = await this.data(); if (!a) throw new Error('E-mail ou senha incorretos.');
@@ -123,6 +188,7 @@ export class Account extends DurableObject {
   }
   async auth(rnd) {
     const a = await this.data(); if (!a) return null;
+    if (!a.id) { a.id = await acctId(a.email); await this.ctx.storage.put('acct', a); }
     const h = await sha(String(rnd || '')); return (a.sessions || []).some((x) => x.h === h) ? a : null;
   }
   async me(rnd) { const a = await this.auth(rnd); if (!a) throw new Error('sessão expirada'); return this.view(a); }
@@ -150,6 +216,12 @@ export class Account extends DurableObject {
     a.rooms = (a.rooms || []).filter((r) => r.code !== code); await this.ctx.storage.put('acct', a); return this.view(a);
   }
 }
+// código de recuperação: 16 letras/números em 4 blocos, sem letras que se confundem
+const REC_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const newRecovery = () => { const b = crypto.getRandomValues(new Uint8Array(16)); let s = ''; for (let i = 0; i < 16; i++) { s += REC_CHARS[b[i] % REC_CHARS.length]; if (i % 4 === 3 && i < 15) s += '-'; } return s; };
+const normRec = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/O/g, '0').replace(/I/g, '1');
+// identificador público da conta (vai nos heróis): não revela o e-mail
+const acctId = async (email) => (await sha('guilda-acct:' + email)).slice(0, 24);
 const acctOf = (env, email) => env.ACCOUNTS.get(env.ACCOUNTS.idFromName('acct:' + email));
 function splitToken(t) {
   const [e, rnd] = String(t || '').split('.');
@@ -160,19 +232,34 @@ function splitToken(t) {
 
 const roomOf = (env, c) => env.ROOMS.get(env.ROOMS.idFromName(c));
 
-async function call(env, fn, a) {
+// quem está escrevendo: a sessão vai no cabeçalho x-guilda-token (guardada em memória por 2 minutos)
+const authCache = new Map();
+async function whoIs(env, token) {
+  if (!token) throw new Error('Entre com a sua conta para continuar. (login)');
+  const hit = authCache.get(token); if (hit && hit.exp > Date.now()) return hit.id;
+  const [e, r] = splitToken(token);
+  let v; try { v = await acctOf(env, e).me(r); } catch (err) { throw new Error('Sua sessão expirou. Entre de novo. (login)'); }
+  if (authCache.size > 500) authCache.clear();
+  authCache.set(token, { id: v.id, exp: Date.now() + 120000 }); return v.id;
+}
+
+async function call(env, fn, a, token) {
   switch (fn) {
     case 'api_room': { const c = code(a[0]); return { meta: await roomOf(env, c).meta() }; }
-    case 'api_create_room': { const c = code(a[0]); return roomOf(env, c).create(c, sized(a[1]), sized(a[2])); }
+    case 'api_create_room': { const c = code(a[0]); const who = await whoIs(env, token); return roomOf(env, c).create(c, sized(a[1]), sized(a[2]), who); }
     case 'api_get': { const c = code(a[1]); return roomOf(env, c).get(c, a[0]); }
-    case 'api_set': { const [c, rel] = split(a[0]); return roomOf(env, c).set(c, rel, sized(a[1])); }
-    case 'api_delete': { const [c, rel] = split(a[0]); return roomOf(env, c).del(c, rel); }
-    case 'api_claim': { const [c, rel] = split(a[0]); return roomOf(env, c).claim(c, rel, sized(a[1])); }
+    case 'api_hero': { const c = code(a[0]); return { hero: await roomOf(env, c).hero(String(a[1] || '').slice(0, 40)) }; }
+    case 'api_set': { const [c, rel] = split(a[0]); const who = await whoIs(env, token); return roomOf(env, c).set(c, rel, sized(a[1]), who); }
+    case 'api_delete': { const [c, rel] = split(a[0]); const who = await whoIs(env, token); return roomOf(env, c).del(c, rel, who); }
+    case 'api_claim': { const [c, rel] = split(a[0]); await whoIs(env, token); return roomOf(env, c).claim(c, rel, sized(a[1])); }
+    case 'api_meta': { const c = code(a[0]); const who = await whoIs(env, token); return roomOf(env, c).setMeta(c, a[1] || {}, who); }
     case 'api_lock': { const c = code(a[0]); return roomOf(env, c).lock(a[1], a[2]); }
     case 'auth_register': { const e = normEmail(a[0]); return acctOf(env, e).register(e, checkPass(a[1])); }
     case 'auth_login': { const e = normEmail(a[0]); return acctOf(env, e).login(e, String(a[1] || '')); }
     case 'auth_me': { const [e, r] = splitToken(a[0]); return acctOf(env, e).me(r); }
-    case 'auth_logout': { const [e, r] = splitToken(a[0]); return acctOf(env, e).logout(r); }
+    case 'auth_logout': { authCache.delete(String(a[0] || '')); const [e, r] = splitToken(a[0]); return acctOf(env, e).logout(r); }
+    case 'auth_recovery': { const [e, r] = splitToken(a[0]); return acctOf(env, e).newRecovery(r); }
+    case 'auth_reset': { const e = normEmail(a[0]); return acctOf(env, e).reset(String(a[1] || ''), checkPass(a[2])); }
     case 'auth_pass': { const [e, r] = splitToken(a[0]); return acctOf(env, e).changePass(r, String(a[1] || ''), checkPass(a[2])); }
     case 'auth_room': { const [e, r] = splitToken(a[0]); const room = a[1] || {}; return acctOf(env, e).roomSet(r, { code: code(room.code), name: room.name, hero: room.hero === undefined ? undefined : (room.hero ? String(room.hero).slice(0, 40) : null), heroName: room.heroName }); }
     case 'auth_room_del': { const [e, r] = splitToken(a[0]); return acctOf(env, e).roomDel(r, code(a[1])); }
@@ -185,13 +272,13 @@ export default {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
     const fn = url.pathname.slice(5);
-    if (fn === 'ping') return json({ guilda: true, v: 1 });
+    if (fn === 'ping') return json({ guilda: true, v: 2 });
     if (request.method !== 'POST') return json({ error: 'use POST' }, 405);
     if (Number(request.headers.get('content-length') || 0) > MAX_BODY) return json({ error: 'pedido grande demais (too_large)' }, 413);
     let args;
     try { args = await request.json(); } catch (e) { return json({ error: 'pedido inválido' }, 400); }
     if (!Array.isArray(args)) return json({ error: 'pedido inválido' }, 400);
-    try { return json(await call(env, fn, args)); }
+    try { return json(await call(env, fn, args, request.headers.get('x-guilda-token') || '')); }
     catch (e) { return json({ error: String((e && e.message) || e) }, 400); }
   },
 };

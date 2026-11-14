@@ -7,7 +7,13 @@ errs = []; fails = []
 def T(ok, msg):
     print(('OK   ' if ok else 'FALHA ') + msg)
     if not ok: fails.append(msg)
-def api(P, fn, *args): return P.evaluate("([f,a])=>fetch('/api/'+f,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(a)}).then(r=>r.json())", [fn, list(args)])
+def api(P, fn, *args):
+    return P.evaluate("""([f,a])=>{const t=(JSON.parse(localStorage.getItem('guilda-auth')||'null')||{}).token||'';
+      return fetch('/api/'+f,{method:'POST',headers:{'content-type':'application/json','x-guilda-token':t},body:JSON.stringify(a)}).then(r=>r.json())}""", [fn, list(args)])
+import time
+def register(P, tag):
+    P.fill('#acct-email', f'{tag}{int(time.time()*1000)}@exemplo.com'); P.fill('#acct-pass', 'senha123'); P.click('[data-act=register]'); P.wait_for_timeout(1800)
+    if P.query_selector('[data-act=recoveryDone]'): P.click('[data-act=recoveryDone]'); P.wait_for_timeout(300)
 def docs(P, code): return api(P, 'api_get', -1, code)['docs']
 def hero(P, code, name): return next((v for k, v in docs(P, code).items() if k.startswith('heroes/') and v.get('name') == name), None)
 def W(P, ms=600): P.wait_for_timeout(ms)
@@ -29,19 +35,19 @@ with sync_playwright() as p:
     def ctx():
         c = b.new_context(viewport={'width': 1150, 'height': 950}); c.add_init_script("localStorage.setItem('guilda-notut','1')"); return c
     A = ctx().new_page(); A.on('pageerror', lambda e: errs.append('A: ' + str(e)))
-    A.goto(URL); W(A, 1500)
+    A.goto(URL); W(A, 1500); register(A, 'a')
     A.fill('#room-name', 'Casa'); A.press('#room-name', 'Enter'); W(A, 2500)
     code = A.evaluate("(document.body.innerText.match(/Sala\\s+([A-Z0-9]{6})/)||[])[1]")
     new_hero(A, 'Ana', 'princesa')
     # ---------- configurações ----------
-    A.click('[data-act=settings]'); W(A)
+    A.click('.nav-btn'); W(A, 200); A.click('.nav-it[data-v=settings]'); W(A)
     T(A.query_selector('#cap-in') is not None and A.query_selector('#mvp-in') is not None, 'configurações mostram limite diário e bônus do destaque')
     A.fill('#cap-in', '100'); A.fill('#mvp-in', '50'); A.click('form[data-form=xpcfg] button[type=submit]'); W(A, 900)
     pm = docs(A, code)['party/main']
     T(pm.get('xpCap') == 100 and pm.get('mvpGold') == 50, f'limite e bônus salvos na sala: {pm.get("xpCap")}, {pm.get("mvpGold")}')
     A.click('[data-act=home]'); W(A)
     # ---------- limite diário ----------
-    A.click('[data-act=open]'); W(A)
+    A.click('.hero-cta [data-act=open]'); W(A)
     for t in ('Dif 1', 'Dif 2', 'Dif 3'): add_task(A, t, 'd')
     done(A, 'Dif 1'); W(A, 4000)
     A.click('xpath=//li[contains(@class,"task")][.//div[@class="t" and text()="Dif 2"]]//button[@data-act="done"]'); W(A, 250)
@@ -69,7 +75,7 @@ with sync_playwright() as p:
     A.click('[data-act=copyInvite]'); W(A, 500)
     close_modal(A)
     B = ctx().new_page(); B.on('pageerror', lambda e: errs.append('B: ' + str(e)))
-    B.goto(link); W(B, 2500)
+    B.goto(link); W(B, 1500); register(B, 'b'); W(B, 1500)
     T('foi convidado' in B.inner_text('body') and 'Casa' in B.inner_text('.invite-hi'), 'quem abre o link entra direto na sala, com boas-vindas')
     T('sala=' not in B.url, f'o endereço é limpo depois de entrar: {B.url}')
     new_hero(B, 'Beto', 'bardo')
@@ -93,9 +99,9 @@ with sync_playwright() as p:
     T('Destaque do dia' in A.inner_text('body'), 'diário de batalhas mostra o destaque do dia')
     T(any('Destaque do dia' in (v.get('text') or '') for k, v in docs(A, code).items() if k.startswith('activity/')), 'histórico registra o destaque')
     A.screenshot(path='/tmp/f3_home.png', full_page=True)
-    A.click('[data-act=open]'); W(A); A.screenshot(path='/tmp/f3_tasks.png')
+    A.click('.hero-cta [data-act=open]'); W(A); A.screenshot(path='/tmp/f3_tasks.png')
     A.click('[data-act=home]'); W(A); A.click('.sessbar [data-act=invite]'); W(A); A.screenshot(path='/tmp/f3_invite.png'); close_modal(A)
-    A.click('[data-act=settings]'); W(A); A.screenshot(path='/tmp/f3_settings.png', full_page=True)
+    A.click('.nav-btn'); W(A, 200); A.click('.nav-it[data-v=settings]'); W(A); A.screenshot(path='/tmp/f3_settings.png', full_page=True)
     b.close()
 print('erros de script:', errs)
 print(f'{len(fails)} FALHAS' if fails else 'TUDO OK')

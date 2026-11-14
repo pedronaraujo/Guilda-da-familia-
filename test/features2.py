@@ -23,6 +23,8 @@ def add_task(P, title, diff='m', freq='once', from_=None):
     P.click('form[data-form=task] button[type=submit]'); W(P, 900)
 def new_hero(P, name, cls):
     P.click('[data-act=create]'); P.fill('#hero-name', name); P.click(f'[data-act=cls][data-v={cls}]'); P.click('[data-act=saveHero]'); W(P, 1200); close_modal(P)
+def menu(P, v):
+    P.click('.nav-btn'); P.wait_for_timeout(200); P.click(f'.nav-it[data-v={v}]'); P.wait_for_timeout(500)
 def go_home(P):
     if P.query_selector('[data-act=home]'): P.click('[data-act=home]'); W(P, 600)
 today = datetime.date.today()
@@ -34,10 +36,11 @@ with sync_playwright() as p:
     A = ctx().new_page(); A.on('pageerror', lambda e: errs.append('A: ' + str(e)))
     A.goto(URL); W(A, 1500)
     # ---------- conta ----------
-    T(A.query_selector('#acct-email') is not None, 'tela inicial mostra o login opcional')
+    T(A.query_selector('#acct-email') is not None, 'tela inicial mostra o login')
     A.fill('#acct-email', EMAIL); A.fill('#acct-pass', '123'); A.click('[data-act=register]'); W(A, 1200)
     T('pelo menos 6' in A.inner_text('body'), 'senha curta é recusada com mensagem')
-    A.fill('#acct-pass', 'senha123'); A.click('[data-act=register]'); W(A, 1500)
+    A.fill('#acct-pass', 'senha123'); A.click('[data-act=register]'); W(A, 1800)
+    if A.query_selector('[data-act=recoveryDone]'): A.click('[data-act=recoveryDone]'); W(A, 300)
     W(A, 1500); bt = A.inner_text('body')
     T('MINHAS SALAS' in bt.upper() and EMAIL in bt, 'conta criada e conectada' + ('' if 'Minhas salas' in bt else ' | ' + bt[:300].replace(chr(10), ' ')))
     A.fill('#room-name', 'Casa'); A.press('#room-name', 'Enter'); W(A, 2500)
@@ -45,7 +48,7 @@ with sync_playwright() as p:
     new_hero(A, 'Ana', 'princesa')
     new_hero_btn = None
     # segunda sala
-    A.click('[data-act=leaveRoom]'); W(A, 800)
+    menu(A, 'leaveRoom'); W(A, 800)
     T('Casa' in A.inner_text('.my-rooms'), 'sala Casa aparece em Minhas salas')
     A.fill('#room-name', 'Amigos'); A.press('#room-name', 'Enter'); W(A, 2500)
     amigos = A.evaluate("document.querySelector('#room-switch') ? null : (document.body.innerText.match(/Sala\\s+([A-Z0-9]{6})/)||[])[1]")
@@ -59,7 +62,7 @@ with sync_playwright() as p:
     # ---------- outro aparelho ----------
     B = ctx().new_page(); B.on('pageerror', lambda e: errs.append('B: ' + str(e)))
     B.goto(URL); W(B, 1500)
-    if B.query_selector('[data-act=leaveRoom]'): B.click('[data-act=leaveRoom]'); W(B, 600)
+    if B.query_selector('.nav-btn'): menu(B, 'leaveRoom'); W(B, 600)
     B.fill('#acct-email', EMAIL); B.fill('#acct-pass', 'errada1'); B.press('#acct-pass', 'Enter'); W(B, 1200)
     T('incorretos' in B.inner_text('body'), 'senha errada é recusada')
     B.fill('#acct-pass', 'senha123'); B.press('#acct-pass', 'Enter'); W(B, 1500)
@@ -67,7 +70,7 @@ with sync_playwright() as p:
     B.click(f'[data-act=goRoom][data-code="{casa}"]'); W(B, 2500)
     T('Jogando como Ana' in B.inner_text('body'), 'no outro aparelho entra direto como Ana')
     # ---------- agendamento ----------
-    A.click('[data-act=open]'); W(A)
+    A.click('.hero-cta [data-act=open]'); W(A)
     add_task(A, 'Consulta futura', 'f', 'once', plus(3))
     add_task(A, 'Treino que começa depois', 'f', 'daily', plus(2))
     body = A.inner_text('body')
@@ -94,8 +97,8 @@ with sync_playwright() as p:
     A.click('xpath=//li[contains(@class,"task")][.//div[@class="t" and starts-with(normalize-space(.),"Difícil 0")]]//button[@data-act="done"]'); W(A, 1200); close_modal(A)
     h4 = hero(A, casa, 'Ana'); T(h4.get('xpDebt', 0) == 0 and h4['xp'] == 60 - h2.get('xpDebt', 0) + (h3.get('xpDebt',0) - h2.get('xpDebt',0)) or h4.get('xpDebt',0) < h3.get('xpDebt',0), f'a próxima tarefa paga o XP a repor primeiro (a repor {h3.get("xpDebt")} → {h4.get("xpDebt")}, xp {h4["xp"]})')
     # ---------- quadro: rostos, filtro, desfazer ----------
-    go_home(A); A.click('[data-act=switchHero]'); W(A); new_hero(A, 'Beto', 'guardiao'); go_home(A)
-    A.click('[data-act=switchHero]'); W(A); A.click('xpath=//button[@data-act="pickMe"][.//div[@class="nm" and text()="Ana"]]'); W(A, 1200); close_modal(A)
+    go_home(A); menu(A, 'switchHero'); W(A); new_hero(A, 'Beto', 'guardiao'); go_home(A)
+    menu(A, 'switchHero'); W(A); A.click('xpath=//button[@data-act="pickMe"][.//div[@class="nm" and text()="Ana"]]'); W(A, 1200); close_modal(A)
     go_home(A)
     A.fill('#board-title', 'Tirar o lixo'); A.click('xpath=//label[contains(@class,"who-item")][.//span[text()="Beto"]]'); W(A, 300); A.click('form[data-form=board] button[type=submit]'); W(A, 1000)
     A.click('xpath=//label[contains(@class,"who-item") and contains(@class,"any")]'); W(A, 300)
@@ -120,10 +123,10 @@ with sync_playwright() as p:
     T(not bd2['done'] and eff(ha2) == eff(ha) - bd['gain'], f'desfazer a missão reabre e tira o XP ({eff(ha)} → {eff(ha2)}, missão valia {bd["gain"]})')
     # sessão encerrada
     B.goto(URL); W(B, 1500)
-    if B.query_selector('[data-act=leaveRoom]'): B.click('[data-act=leaveRoom]'); W(B, 600)
+    if B.query_selector('.nav-btn'): menu(B, 'leaveRoom'); W(B, 600)
     B.click('[data-act=logout]'); W(B, 800)
     T(B.query_selector('#acct-email') is not None, 'sair da conta volta ao login')
     A.screenshot(path='/tmp/f2_home.png', full_page=True)
-    A.click('[data-act=leaveRoom]'); W(A, 800); A.screenshot(path='/tmp/f2_rooms.png', full_page=True)
+    menu(A, 'leaveRoom'); W(A, 800); A.screenshot(path='/tmp/f2_rooms.png', full_page=True)
     b.close()
 print(errs or 'sem erros no console'); print('FALHAS:', len(fails))

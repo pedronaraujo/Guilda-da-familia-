@@ -137,7 +137,102 @@
       case 'gibao': return legs + `<path d="${torso}" fill="${lt}"/><path d="M44 76 L52 74 L56 118 L41 118Z M76 76 L68 74 L64 118 L79 118Z" fill="${c}"/><rect x="40" y="102" width="40" height="6" fill="#5a3a22"/><rect x="56" y="101" width="8" height="8" rx="1" fill="none" stroke="#d6b85a" stroke-width="2"/><path d="M60 78 v20" stroke="${dk}" stroke-dasharray="2 3"/>`;
       case 'vestido': return legs + `<path d="M42 80 C42 74 50 72 60 72 C70 72 78 74 78 80 L${76 - waist} 98 L86 126 L34 126 L${44 + waist} 98Z" fill="${c}"/><path d="M34 126 Q60 132 86 126" stroke="${lt}" stroke-width="3" fill="none"/><rect x="${44 + waist}" y="96" width="${32 - waist * 2}" height="4" fill="${dk}"/>${emblem}`;
     }
+    // ----- roupas temáticas -----
+    const T = themedOutfit(style, c, gender, skin, clsColor, feet, hairC, torso, waist);
+    if (T) return T;
     return legs + `<path d="${torso}" fill="${c}"/>`;
+  }
+  // pernas com cor e calçado escolhidos (respeita pés de hobbit/sátiro)
+  function legsCol(feet, col, boot, skin, hairC, h) {
+    if (feet === 'goat') return legsSvg(feet, col, skin, hairC);
+    if (feet === 'bare') return `<rect x="47" y="114" width="10" height="20" rx="4" fill="${col}"/><rect x="63" y="114" width="10" height="20" rx="4" fill="${col}"/>` + feetSvg(feet, skin, hairC);
+    h = h || 24;
+    return `<rect x="47" y="114" width="10" height="${h}" rx="4" fill="${col}"/><rect x="63" y="114" width="10" height="${h}" rx="4" fill="${col}"/><ellipse cx="51" cy="140" rx="8" ry="4" fill="${boot}"/><ellipse cx="69" cy="140" rx="8" ry="4" fill="${boot}"/>`;
+  }
+  const isDark = (c) => { const n = parseInt(String(c).slice(1), 16); return ((n >> 16) * 0.3 + ((n >> 8) & 255) * 0.59 + (n & 255) * 0.11) < 70; };
+  function themedOutfit(style, c, gender, skin, clsColor, feet, hairC, torso, waist) {
+    const dk = shade(c, -0.3), lt = shade(c, 0.25);
+    const long = (bottom) => `M40 80 C40 74 48 72 60 72 C72 72 80 74 80 80 L${78 - waist} 100 L${82} ${bottom} L38 ${bottom} L${42 + waist} 100Z`;
+    switch (style) {
+      case 'natal': {
+        const red = '#c8302c', fur = '#f6f2ee';
+        return legsCol(feet, red, '#1c1414', skin, hairC) + `<path d="${long(120)}" fill="${red}"/><path d="M38 116 Q60 122 82 116 L82 122 Q60 128 38 122Z" fill="${fur}"/><rect x="56" y="74" width="8" height="44" fill="${fur}"/><rect x="40" y="99" width="40" height="7" fill="#1c1414"/><rect x="55" y="98" width="10" height="9" rx="1.5" fill="none" stroke="#f4c84a" stroke-width="2"/><path d="M48 74 Q60 80 72 74" stroke="${fur}" stroke-width="5" fill="none" stroke-linecap="round"/><circle cx="60" cy="86" r="1.6" fill="#1c1414"/><circle cx="60" cy="92" r="1.6" fill="#1c1414"/>`;
+      }
+      case 'cyberpunk': {
+        const neon = isDark(c) ? '#3af0ff' : shade(c, 0.15), base = '#1a1a24';
+        return legsCol(feet, '#22222e', '#0e0e14', skin, hairC) + `<path d="M48 120 v14 M72 120 v14" stroke="${neon}" stroke-width="1.6" opacity=".9"/><path d="${torso}" fill="${base}"/><path d="M44 76 L52 72 L60 84 L68 72 L76 76 L74 82 L60 92 L46 82Z" fill="#2a2a3a"/><path d="M60 84 L66 118" stroke="${neon}" stroke-width="2"/><path d="M42 104 H78" stroke="${neon}" stroke-width="1.4" opacity=".8"/><path d="M44 90 l6 0 M70 96 l6 0 M44 112 l8 0" stroke="${neon}" stroke-width="1.6" stroke-linecap="round"/><rect x="66" y="86" width="9" height="5" rx="1" fill="${neon}" opacity=".85"/><circle cx="48" cy="98" r="1.3" fill="#ff3ab4"/>`;
+      }
+      case 'praia': {
+        const shorts = isDark(c) ? '#3a6ab0' : shade(c, -0.4);
+        const flowers = [[48, 84, '#fff6c8'], [66, 80, '#ffffff'], [56, 96, '#ffd84a'], [72, 98, '#fff6c8'], [46, 104, '#ffffff']].map(([x, y, f]) => `<circle cx="${x}" cy="${y}" r="3.2" fill="${f}" opacity=".9"/><circle cx="${x}" cy="${y}" r="1.1" fill="#ff8a3a"/>`).join('');
+        const legsBare = feet ? feetSvg(feet, skin, hairC) : `<rect x="47" y="118" width="10" height="20" rx="4" fill="${skin}"/><rect x="63" y="118" width="10" height="20" rx="4" fill="${skin}"/><ellipse cx="51" cy="140.5" rx="8" ry="3" fill="#ff8ab8"/><ellipse cx="69" cy="140.5" rx="8" ry="3" fill="#ff8ab8"/><path d="M48 138 l3 2.5 3 -2.5 M66 138 l3 2.5 3 -2.5" stroke="#ff5a8a" stroke-width="1.4" fill="none"/>`;
+        return legsBare + `<path d="M42 104 h36 l2 20 h-17 l-3 -8 l-3 8 h-17Z" fill="${shorts}"/><path d="M40 80 C40 74 48 72 60 72 C72 72 80 74 80 80 L78 108 L42 108Z" fill="${c}"/>${flowers}<path d="M52 72 L60 84 L68 72" fill="none" stroke="${lt}" stroke-width="2.2"/>`;
+      }
+      case 'pesada': {
+        const m = '#9aa4ae', md = '#5e6872', ml = '#c8d0d8';
+        return legsCol(feet, md, '#4a525a', skin, hairC) + `<ellipse cx="52" cy="124" rx="5" ry="4" fill="${ml}" stroke="${md}"/><ellipse cx="68" cy="124" rx="5" ry="4" fill="${ml}" stroke="${md}"/><path d="${torso}" fill="${m}" stroke="${md}" stroke-width="1.5"/><path d="M40 108 L46 122 L56 118 L60 124 L64 118 L74 122 L80 108Z" fill="${m}" stroke="${md}" stroke-width="1.2"/><rect x="55" y="80" width="10" height="40" fill="${c}"/><path d="M55 80 h10 M55 120 l5 4 5 -4" stroke="${shade(c, -0.35)}" stroke-width="1.2" fill="none"/><path d="M44 92 h11 M65 92 h11 M44 102 h11 M65 102 h11" stroke="${md}" stroke-width="1.5"/><ellipse cx="38" cy="80" rx="14" ry="10" fill="${ml}" stroke="${md}" stroke-width="1.5"/><ellipse cx="82" cy="80" rx="14" ry="10" fill="${ml}" stroke="${md}" stroke-width="1.5"/><path d="M27 82 Q38 88 49 82 M71 82 Q82 88 93 82" stroke="${md}" stroke-width="1.4" fill="none"/>${`<path d="M60 84 l3 4 -3 4 -3 -4Z" fill="${clsColor}"/>`}`;
+      }
+      case 'kimono': {
+        const obi = isDark(c) ? '#d8a838' : shade(c, -0.45);
+        return legsCol(feet, shade(c, -0.25), '#8a5a32', skin, hairC, 22) + `<path d="M40 80 C40 74 48 72 60 72 C72 72 80 74 80 80 L80 130 L40 130Z" fill="${c}"/><path d="M48 72 L66 104 L80 80 L80 130 L62 130Z" fill="${dk}" opacity=".35"/><path d="M50 72 L64 100 M70 72 L58 92" stroke="#f6f2ee" stroke-width="3" stroke-linecap="round"/><rect x="40" y="96" width="40" height="11" fill="${obi}"/><path d="M40 101.5 h40" stroke="${shade(obi, 0.35)}" stroke-width="1.4"/><path d="M66 107 l6 10 -8 -3Z" fill="${obi}"/><g fill="${lt}" opacity=".6"><circle cx="46" cy="118" r="2.2"/><circle cx="72" cy="122" r="2.2"/><circle cx="52" cy="126" r="1.6"/></g>`;
+      }
+      case 'pirata': {
+        const stripe = isDark(c) ? '#c8302c' : c;
+        return legsCol(feet, '#4a3a2e', '#1c1414', skin, hairC) + `<path d="${torso}" fill="#f6f2ee"/><g stroke="${stripe}" stroke-width="3">${[80, 87, 94, 101, 108, 115].map((y) => `<path d="M42 ${y} H78"/>`).join('')}</g><path d="M40 80 C40 74 46 72 50 72 L54 118 L40 118Z M80 80 C80 74 74 72 70 72 L66 118 L80 118Z" fill="#3a2a1e"/><path d="M40 104 Q60 110 80 104 L80 110 Q60 116 40 110Z" fill="#c8302c"/><path d="M76 108 l6 12 -6 -2Z" fill="#a8241f"/><circle cx="52" cy="86" r="1.2" fill="#d6b85a"/><circle cx="52" cy="94" r="1.2" fill="#d6b85a"/>`;
+      }
+      case 'astronauta': {
+        const w = '#eef0f4', wd = '#b8c0cc';
+        return legsCol(feet, w, '#8a94a4', skin, hairC) + `<path d="M46 124 h10 M64 124 h10" stroke="${wd}" stroke-width="2"/><path d="${torso}" fill="${w}" stroke="${wd}" stroke-width="1.4"/><rect x="48" y="84" width="24" height="14" rx="2" fill="#4a5262"/><circle cx="53" cy="91" r="2" fill="${c}"/><circle cx="60" cy="91" r="2" fill="#ffd84a"/><circle cx="67" cy="91" r="2" fill="#3af07a"/><rect x="40" y="104" width="40" height="6" fill="${wd}"/><path d="M42 78 H78" stroke="${c}" stroke-width="3"/><rect x="68" y="76" width="8" height="5" fill="#2a4a9a"/><path d="M68 77.6 h8 M68 79.4 h8" stroke="#fff" stroke-width=".7"/>`;
+      }
+      case 'ninja': {
+        const base = '#22222c', band = isDark(c) ? '#c8302c' : c;
+        return legsCol(feet, '#1a1a22', '#101016', skin, hairC) + `<path d="M48 120 l8 4 M48 126 l8 4 M64 120 l8 4 M64 126 l8 4" stroke="#3a3a48" stroke-width="1.6"/><path d="${torso}" fill="${base}"/><path d="M48 72 L60 90 L72 72" fill="none" stroke="#3a3a48" stroke-width="3"/><path d="M50 72 L64 96" stroke="#3a3a48" stroke-width="2"/><rect x="40" y="100" width="40" height="7" fill="${band}"/><path d="M42 107 l-4 10 6 -4Z" fill="${band}"/>`;
+      }
+      case 'caipira': {
+        const jeans = '#3a5a8a';
+        const plaid = `<g stroke="${dk}" stroke-width="2.2" opacity=".75">${[78, 86, 94, 102].map((y) => `<path d="M40 ${y} H80"/>`).join('')}${[46, 54, 62, 70, 78].map((x) => `<path d="M${x} 72 V112"/>`).join('')}</g><g stroke="#f6f2ee" stroke-width=".9" opacity=".6">${[82, 90, 98].map((y) => `<path d="M40 ${y} H80"/>`).join('')}${[50, 58, 66, 74].map((x) => `<path d="M${x} 72 V112"/>`).join('')}</g>`;
+        return legsCol(feet, jeans, '#5a3a22', skin, hairC) + `<rect x="48" y="122" width="7" height="7" fill="#e8c870" transform="rotate(-8 51 125)"/><rect x="65" y="118" width="7" height="6" fill="#c8302c" transform="rotate(10 68 121)"/><path d="M41 108 h38 v10 h-38Z" fill="${jeans}"/><defs><clipPath id="cp${style}"><path d="M40 80 C40 74 48 72 60 72 C72 72 80 74 80 80 L79 110 L41 110Z"/></clipPath></defs><path d="M40 80 C40 74 48 72 60 72 C72 72 80 74 80 80 L79 110 L41 110Z" fill="${c}"/><g clip-path="url(#cp${style})">${plaid}</g><path d="M52 72 L60 80 L68 72" fill="#f6f2ee"/><circle cx="60" cy="88" r="1.2" fill="#f6f2ee"/><circle cx="60" cy="96" r="1.2" fill="#f6f2ee"/><rect x="41" y="106" width="38" height="4" fill="#5a3a22"/>`;
+      }
+      case 'pijama': {
+        const dots = [[46, 84], [70, 82], [58, 96], [48, 108], [72, 106], [52, 126], [68, 130]].map(([x, y], i) => i % 2 ? `<path d="M${x} ${y - 3} l1 2.2 2.4 .3 -1.8 1.6 .5 2.4 -2.1 -1.2 -2.1 1.2 .5 -2.4 -1.8 -1.6 2.4 -.3Z" fill="#fff6c8"/>` : `<path d="M${x + 2} ${y - 3} a3.2 3.2 0 1 0 0 6 a2.4 2.4 0 1 1 0 -6Z" fill="#fff6c8"/>`).join('');
+        return `<rect x="46" y="114" width="12" height="24" rx="4" fill="${c}"/><rect x="62" y="114" width="12" height="24" rx="4" fill="${c}"/>${feet ? feetSvg(feet, skin, hairC) : `<ellipse cx="51" cy="140" rx="9" ry="5" fill="#f6c8d8"/><ellipse cx="69" cy="140" rx="9" ry="5" fill="#f6c8d8"/><circle cx="46" cy="136" r="2.4" fill="#f6c8d8"/><circle cx="74" cy="136" r="2.4" fill="#f6c8d8"/>`}<path d="${torso}" fill="${c}"/><path d="M50 72 L60 82 L70 72" fill="${lt}"/><path d="M60 82 V118" stroke="${dk}" stroke-width="1.4"/><circle cx="62.5" cy="90" r="1.3" fill="${lt}"/><circle cx="62.5" cy="100" r="1.3" fill="${lt}"/><circle cx="62.5" cy="110" r="1.3" fill="${lt}"/>${dots}`;
+      }
+      case 'heroi': {
+        const boot = '#c8302c', gold = '#f4c84a';
+        return legsCol(feet, c, boot, skin, hairC) + `<rect x="46" y="128" width="12" height="10" rx="3" fill="${boot}"/><rect x="62" y="128" width="12" height="10" rx="3" fill="${boot}"/><path d="${torso}" fill="${c}"/><path d="M46 80 L74 80 L60 98Z" fill="${gold}" stroke="${shade(gold, -0.3)}" stroke-width="1.2"/><path d="M57 84 L63 84 L60 90Z" fill="${c}"/><rect x="40" y="104" width="40" height="5" fill="${gold}"/><rect x="56" y="103" width="8" height="7" rx="2" fill="${boot}"/><path d="M44 112 L60 116 L76 112 L76 118 L44 118Z" fill="${dk}"/>`;
+      }
+      case 'gala': {
+        const tie = c;
+        return legsCol(feet, '#16161c', '#0a0a0e', skin, hairC) + `<path d="M40 80 C40 74 48 72 60 72 C72 72 80 74 80 80 L${78 - waist} 100 L82 120 L38 120 L${42 + waist} 100Z" fill="#1c1c24"/><path d="M52 72 L60 100 L68 72Z" fill="#f6f2ee"/><path d="M52 72 L60 100 L56 104 L46 78Z M68 72 L60 100 L64 104 L74 78Z" fill="#2a2a36"/><path d="M54 77 L60 80 L66 77 L66 83 L60 80 L54 83Z" fill="${tie}"/><circle cx="60" cy="88" r="1" fill="#1c1c24"/><circle cx="60" cy="94" r="1" fill="#1c1c24"/><path d="M70 86 l5 -1 0 3 -5 1Z" fill="#f6f2ee"/>`;
+      }
+      case 'explorador': {
+        const khaki = '#c8b07a', kd = '#9a8452';
+        return legsCol(feet, kd, '#5a3a22', skin, hairC) + `<path d="${torso}" fill="${khaki}"/><rect x="44" y="82" width="11" height="10" rx="1.5" fill="${kd}"/><rect x="65" y="82" width="11" height="10" rx="1.5" fill="${kd}"/><path d="M44 85 h11 M65 85 h11" stroke="${shade(kd, -0.3)}" stroke-width="1"/><path d="M52 72 L60 80 L68 72" fill="${kd}"/><rect x="40" y="104" width="40" height="6" fill="#5a3a22"/><rect x="56" y="103" width="8" height="8" rx="1" fill="none" stroke="#d6b85a" stroke-width="1.8"/><path d="M44 76 L76 110" stroke="${c}" stroke-width="3"/><circle cx="73" cy="106" r="4" fill="#8a949e" stroke="#5a646e"/>`;
+      }
+      case 'viking': {
+        const fur = '#8a6a44', fd = '#5a4228';
+        return legsCol(feet, '#5a4a3a', '#3a2a1e', skin, hairC) + `<path d="M48 118 l8 6 M48 124 l8 6 M48 130 l8 6 M64 118 l8 6 M64 124 l8 6 M64 130 l8 6" stroke="#b8a07a" stroke-width="1.5"/><path d="${long(120)}" fill="${c}"/><path d="M38 114 l4 6 4 -6 4 6 4 -6 4 6 4 -6 4 6 4 -6 4 6 4 -6 4 6" stroke="${dk}" stroke-width="2" fill="none"/><rect x="40" y="99" width="40" height="7" fill="#4a3220"/><circle cx="60" cy="102.5" r="5" fill="#d6b85a" stroke="#8a6a2a" stroke-width="1.2"/><path d="M30 80 C32 70 46 68 60 72 C74 68 88 70 90 80 C84 86 78 82 74 86 C70 80 66 84 60 82 C54 84 50 80 46 86 C42 82 36 86 30 80Z" fill="${fur}"/><path d="M36 80 l2 3 M44 78 l1 4 M54 78 v4 M66 78 v4 M76 78 l-1 4 M84 80 l-2 3" stroke="${fd}" stroke-width="1.4"/>`;
+      }
+    }
+    return '';
+  }
+  // cor das mangas de cada roupa (as temáticas têm cor própria)
+  function sleeveOf(style, c, skin) {
+    switch (style) {
+      case 'natal': return { c: '#c8302c', cuff: '#f6f2ee' };
+      case 'cyberpunk': return { c: '#1a1a24', cuff: isDark(c) ? '#3af0ff' : shade(c, 0.15) };
+      case 'praia': return { c: skin, top: c };
+      case 'pesada': return { c: '#9aa4ae', cuff: '#5e6872' };
+      case 'kimono': return { c, w: 13 };
+      case 'pirata': return { c: '#f6f2ee' };
+      case 'astronauta': return { c: '#eef0f4', cuff: c };
+      case 'ninja': return { c: '#22222c' };
+      case 'pijama': return { c };
+      case 'gala': return { c: '#1c1c24', cuff: '#f6f2ee' };
+      case 'explorador': return { c: '#c8b07a' };
+      case 'viking': return { c: '#5a4a3a' };
+      default: return { c };
+    }
   }
   function hatSvg(id, clsColor) {
     switch (id) {
@@ -374,7 +469,10 @@
     if (cape) pushB(capeSvg(cape, id));
     if (!hideHair) pushB(hairBack(L.hairStyle, hairC, L.gender));
     // braços
-    pushB(`<path d="M42 78 C34 84 32 96 34 106" stroke="${outC}" stroke-width="9" fill="none" stroke-linecap="round"/><path d="M78 78 C86 84 88 96 86 106" stroke="${outC}" stroke-width="9" fill="none" stroke-linecap="round"/>`);
+    { const sl = sleeveOf(L.outfit, outC, skin); const w = sl.w || 9;
+      pushB(`<path d="M42 78 C34 84 32 96 34 106" stroke="${sl.c}" stroke-width="${w}" fill="none" stroke-linecap="round"/><path d="M78 78 C86 84 88 96 86 106" stroke="${sl.c}" stroke-width="${w}" fill="none" stroke-linecap="round"/>`
+        + (sl.top ? `<path d="M42 78 C38 81 36 84 35.5 88" stroke="${sl.top}" stroke-width="10" fill="none" stroke-linecap="round"/><path d="M78 78 C82 81 84 84 84.5 88" stroke="${sl.top}" stroke-width="10" fill="none" stroke-linecap="round"/>` : '')
+        + (sl.cuff ? `<path d="M33.6 101 L34 105 M86.4 101 L86 105" stroke="${sl.cuff}" stroke-width="${w + 1}" stroke-linecap="butt"/>` : '')); }
     pushB(outfitSvg(L.outfit, outC, L.gender, skin, cls.color, feet, hairC));
     if (cos.armor) pushB(armorSvg(cos.armor));
     pushB(`<circle cx="34" cy="108" r="5" fill="${skin}"/><circle cx="86" cy="108" r="5" fill="${skin}"/>`);

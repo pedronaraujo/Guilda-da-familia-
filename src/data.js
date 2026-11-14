@@ -506,7 +506,7 @@
   const PUNCTUAL_BONUS = 0.25;   // +25% se feita até o horário
   const DUO_SHARE = 0.6;         // cada herói da dupla ganha 60% (juntos, 120%)
   const STREAK_STEP = 0.02, STREAK_MAX = 0.2; // +2% de XP por dia seguido, até +20%
-  const KUDOS_XP = 10, KUDOS_PER_DAY = 3;
+  const KUDOS_XP = 10, KUDOS_PER_DAY = 2;
   // Conquistas: test recebe o herói e um contexto { party, guild }
   const ACH = [
     { id: 'first', name: 'Primeiro passo', desc: 'Cumprir a primeira tarefa', gold: 10, test: (h) => (h.stats.done || 0) >= 1 },
@@ -778,6 +778,12 @@
     outfit: [
       { id: 'tunica', name: 'Túnica' }, { id: 'manto', name: 'Manto longo' }, { id: 'armadura', name: 'Armadura' },
       { id: 'gibao', name: 'Gibão com cinto' }, { id: 'vestido', name: 'Vestido de batalha' },
+      // temáticas
+      { id: 'natal', name: 'Natal', theme: true }, { id: 'cyberpunk', name: 'Cyberpunk', theme: true }, { id: 'praia', name: 'Praia', theme: true },
+      { id: 'pesada', name: 'Armadura pesada', theme: true }, { id: 'kimono', name: 'Kimono', theme: true }, { id: 'pirata', name: 'Pirata', theme: true },
+      { id: 'astronauta', name: 'Astronauta', theme: true }, { id: 'ninja', name: 'Ninja', theme: true }, { id: 'caipira', name: 'Festa junina', theme: true },
+      { id: 'pijama', name: 'Pijama', theme: true }, { id: 'heroi', name: 'Super-herói', theme: true }, { id: 'gala', name: 'Traje de gala', theme: true },
+      { id: 'explorador', name: 'Explorador', theme: true }, { id: 'viking', name: 'Viking', theme: true },
     ],
     outfitColor: ['#3d5a99', '#a33b36', '#3f7d4f', '#6a4a9c', '#2b2b33', '#b98a3a', '#e6e0d2', '#2f8a8a'],
   };

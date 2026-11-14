@@ -1,6 +1,6 @@
-# Guilda da Família
+# Dungeons and Tasks
 
-Gestor de tarefas da família em forma de RPG: cada pessoa cria um herói, cumpre tarefas do dia, ganha experiência, ouro e itens, e à meia-noite o grupo enfrenta uma batalha automática.
+Gestor de tarefas em forma de RPG, para a família, os amigos ou o time do trabalho: cada pessoa cria um herói, cumpre tarefas do dia, ganha experiência, ouro e itens, e à meia-noite o grupo enfrenta uma batalha automática.
 
 Criado por Pedro Tostes com o Claude.
 

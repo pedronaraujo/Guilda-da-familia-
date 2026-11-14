@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Guilda da Família</title>
+<title>Dungeons and Tasks</title>
+<meta name="description" content="Dungeons and Tasks: tarefas viram missões, o grupo sobe de nível e enfrenta uma batalha toda meia-noite.">
+<meta name="theme-color" content="#10161b">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:wght@400;700;800;900&family=Grenze+Gotisch:wght@600;700&display=swap" rel="stylesheet">
@@ -783,6 +785,9 @@ s.small { opacity: .6; }
 .snaps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 340px; overflow: auto; }
 .snaps li { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,.03); }
 .snaps li > span { flex: 1; }
+/* marca Dungeons and Tasks */
+.app-logo { font-family: var(--f-display); font-size: clamp(38px, 7vw, 60px); line-height: 1; margin: 6px 0 10px; color: var(--gold); letter-spacing: .01em; }
+.brand .app-tag { display: block; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-top: 4px; font-weight: 800; }
 
 </style>
 </head>
@@ -2654,8 +2659,9 @@ s.small { opacity: .6; }
   G.ART = { heroSvg, enemySvg, enemyArt, petSvg, shade, sceneSvg };
 })(typeof window !== 'undefined' ? window : globalThis);
 
-/* ===== Aplicativo: Guilda da Família ===== */
+/* ===== Aplicativo: Dungeons and Tasks ===== */
 (function () {
+  const APP_NAME = 'Dungeons and Tasks';
   const D = window.DATA, E = window.ENGINE, A = window.ART;
   const $app = document.getElementById('app');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2933,7 +2939,7 @@ s.small { opacity: .6; }
   const stage = () => (S.party && S.party.stage) || 1;
   const mulOf = (p) => (p && typeof p.diffMul === 'number' ? p.diffMul : ((D.LEVELS[(p && p.difficulty) || 'normal'] || D.LEVELS.normal).mul));
   function levelFor(mul) {
-    const n = mul < 0.8 ? ['Tranquila', 'Vitórias frequentes. Bom para começar.'] : mul < 1.08 ? ['Normal', 'Uma família ativa vence a maioria, mas não todas.'] : mul < 1.25 ? ['Desafiadora', 'Derrotas são comuns. Cada tarefa pesa.'] : mul < 1.45 ? ['Épica', 'Só um grupo muito dedicado avança rápido.'] : ['Lendária', 'Para quem quer suar a cada vitória.'];
+    const n = mul < 0.8 ? ['Tranquila', 'Vitórias frequentes. Bom para começar.'] : mul < 1.08 ? ['Normal', 'Uma guilda ativa vence a maioria, mas não todas.'] : mul < 1.25 ? ['Desafiadora', 'Derrotas são comuns. Cada tarefa pesa.'] : mul < 1.45 ? ['Épica', 'Só um grupo muito dedicado avança rápido.'] : ['Lendária', 'Para quem quer suar a cada vitória.'];
     return { mul, name: n[0], blurb: n[1] };
   }
   const level = () => { const l = levelFor(mulOf(S.party)); const e = eventOn() && eventOn().fx && eventOn().fx.enemy; return e ? Object.assign({}, l, { mul: l.mul * (1 + e) }) : l; };
@@ -3466,7 +3472,7 @@ s.small { opacity: .6; }
 
   /* ---------------- Render ---------------- */
   function render() {
-    if (!S.ready || S.busy) { $app.innerHTML = `<div class="loading"><div><h2>Abrindo os portões da guilda…</h2><p class="muted">Carregando os heróis da família.</p></div></div>`; return; }
+    if (!S.ready || S.busy) { $app.innerHTML = `<div class="loading"><div><h2>Abrindo os portões da guilda…</h2><p class="muted">Carregando os heróis da guilda.</p></div></div>`; return; }
     if (S.room && S.view !== 'rooms') computeChance();
     const focus = document.activeElement && document.activeElement.id;
     const sel = document.activeElement && document.activeElement.selectionStart;
@@ -3505,9 +3511,9 @@ s.small { opacity: .6; }
 
   /* ---------------- Tutorial passo a passo ---------------- */
   const TUT = [
-    { view: 'home', title: 'Bem-vindo à guilda!', text: (h) => `Olá, ${h.name}! Aqui cada tarefa de casa vira experiência para o seu herói. ${Store.server ? 'Ele fica ligado à sua conta: só você e o organizador da sala jogam com ele. ' : ''}Vou mostrar o caminho em poucos passos.` },
+    { view: 'home', title: 'Bem-vindo à guilda!', text: (h) => `Olá, ${h.name}! Aqui cada tarefa vira experiência para o seu herói. ${Store.server ? 'Ele fica ligado à sua conta: só você e o organizador da sala jogam com ele. ' : ''}Vou mostrar o caminho em poucos passos.` },
     { view: 'home', sel: '.nightfight', title: 'A batalha da noite', text: () => 'Toda meia-noite a guilda enfrenta os inimigos deste card. Aqui ficam o desafio, a dificuldade e a chance de vitória. Vencer dá ouro e avança de estágio.' },
-    { view: 'home', sel: '.slot.mine', title: 'Este é você', text: () => 'Seu herói fica no salão junto com a família. Toque nele para abrir a página dele.' },
+    { view: 'home', sel: '.slot.mine', title: 'Este é você', text: () => 'Seu herói fica no salão junto com o resto da guilda. Toque nele para abrir a página dele.' },
     { view: 'home', sel: '.hero-cta', title: 'Desenvolva o seu herói', text: () => 'Tarefas, habilidades, loja, conquistas e visual ficam na página do herói. Este botão leva direto para lá.' },
     { view: 'home', sel: '.slot.other .kudos-btn', title: 'Elogios com emoji', text: () => `Elogie alguém com um emoji: a pessoa ganha XP e o emoji fica embaixo do herói até a meia-noite. Você tem ${D.KUDOS_PER_DAY} elogios por dia, um para cada pessoa.` },
     { view: 'home', sel: '.board', title: 'Quadro da guilda', text: () => 'Missões da casa, com o rosto de quem é responsável. Use os botões acima da lista para ver só as de uma pessoa. Quem cumprir primeiro leva a experiência; ↺ desfaz.' },
@@ -3518,7 +3524,7 @@ s.small { opacity: .6; }
     { view: 'hero', tab: 'habilidades', sel: '.tree', title: 'Habilidades', text: () => 'Cada nível dá 1 ponto. Gaste aqui: as habilidades deixam o herói bem mais forte na batalha. A árvore vai até o nível 50.' },
     { view: 'hero', tab: 'loja', sel: '.shop-cats', title: 'Loja', text: () => 'Use o ouro das vitórias em equipamentos, poções e itens de estilo. Toque na imagem de um item para ver de perto.' },
     { view: 'home', sel: '.nav-btn', title: 'Menu', text: () => `Todas as partes do app estão neste menu: salão, cada aba do herói, bestiário, convite${isCreator() ? ', configurações e relatório' : ''}, trocar de sala e sair da conta.` },
-    { view: 'home', sel: '.sessbar [data-act=invite]', title: 'Convidar a família', text: () => 'Gere um link e mande no WhatsApp: quem abrir entra direto na sala e cria o próprio herói.' },
+    { view: 'home', sel: '.sessbar [data-act=invite]', title: 'Convidar o pessoal', text: () => 'Gere um link e mande no WhatsApp: quem abrir entra direto na sala e cria o próprio herói.' },
     { view: 'home', sel: '.nav-btn', title: 'Para o organizador', skip: () => !isCreator(), text: () => 'Em Menu → Configurações você muda o nome e as vagas da sala, o limite diário de XP, o bônus do destaque, aprovação de tarefas, personagens importados, reabre tarefas feitas e expulsa heróis.' },
     { view: 'home', sel: '.nav-btn', title: 'Pronto para a aventura!', text: () => 'Para rever este passo a passo quando quiser, abra o Menu e toque em Tutorial.' },
   ];
@@ -3581,9 +3587,9 @@ s.small { opacity: .6; }
   function topbar() {
     const inRoom = S.room && !['rooms'].includes(S.view);
     const me = S.me && S.heroes[S.me];
-    const title = (S.roomMeta && S.roomMeta.name) || 'Guilda da Família';
+    const title = (S.roomMeta && S.roomMeta.name) || APP_NAME;
     const back = ['hero', 'create', 'settings', 'bestiary', 'report'].includes(S.view) && S.me ? `<button class="back" data-act="home">← Salão</button>` : '';
-    return `<header class="topbar"><div class="brand">${back}<h1>${esc(inRoom ? title : 'Guilda da Família')}</h1></div>
+    return `<header class="topbar"><div class="brand">${back}<h1>${esc(inRoom ? title : APP_NAME)}</h1>${inRoom ? `<span class="app-tag">${APP_NAME}</span>` : ''}</div>
       ${inRoom ? `<div class="chips">${Acct.on() && S.acct.rooms.length > 1 ? `<label class="chip room-sw"><span class="sr-only">Trocar de sala</span><select id="room-switch" aria-label="Trocar de sala">${S.acct.rooms.map((r) => `<option value="${esc(r.code)}" ${r.code === S.room ? 'selected' : ''}>${esc(r.name || r.code)} · ${esc(r.code)}</option>`).join('')}</select></label>` : `<span class="chip">Sala <b class="num">${esc(S.room)}</b></span>`}${S.party && S.view !== 'select' ? `<span class="chip">Estágio <b class="num">${stage()}</b> · ${esc(E.regionOf(stage()).name)}</span><span class="chip warn">Batalha à meia-noite · <b class="num">${countdown()}</b></span>` : ''}</div>` : ''}</header>
       ${inRoom ? `<div class="sessbar">${me ? `<span class="who">${A.heroSvg(me, { noPet: true, noWeapon: true })}<span>Jogando como <b>${esc(me.name)}</b> ${roleTag(me)}</span></span>` : '<span class="muted">Escolha seu personagem</span>'}
         <span class="spacer"></span>${canInvite() ? '<button class="btn sm" data-act="invite">Convidar</button>' : ''}<button class="btn sm ghost" data-act="toggleSound" aria-pressed="${Sound.on}">${Sound.on ? 'Som ligado' : 'Som desligado'}</button>${navMenu(me)}</div>` : ''}`;
@@ -3594,7 +3600,7 @@ s.small { opacity: .6; }
   function inviteParam() {
     try { const q = new URLSearchParams(location.search).get('sala') || (location.hash.match(/sala=([A-Za-z0-9]{6})/) || [])[1]; const c = q ? normCode(q) : ''; return c.length === 6 ? c : null; } catch (e) { return null; }
   }
-  const inviteText = () => `Venha para a nossa guilda "${(S.roomMeta && S.roomMeta.name) || 'Guilda da Família'}" e transforme as tarefas em aventura! Entre por este link:`;
+  const inviteText = () => `Venha para a nossa guilda "${(S.roomMeta && S.roomMeta.name) || APP_NAME}" no ${APP_NAME} e transforme as tarefas em aventura! Entre por este link:`;
   /* ----- Menu suspenso com todas as partes do app ----- */
   const HERO_TABS = [['tarefas', 'Tarefas', 'o que fazer hoje'], ['recompensas', 'Recompensas', 'troque XP por prêmios'], ['habilidades', 'Habilidades', 'evolua o herói'], ['loja', 'Loja', 'equipamentos, roupas e poções'], ['conquistas', 'Conquistas', 'medalhas'], ['visual', 'Visual', 'aparência e aniversário']];
   function navMenu(me) {
@@ -3604,7 +3610,7 @@ s.small { opacity: .6; }
       ${S.navOpen ? `<div class="nav-pop" role="menu">
         ${me ? `<div class="nav-g">Guilda</div>${it('navGo', 'Salão da guilda', 'batalha, quadro e ranking', 'data-v="home"')}${it('navGo', 'Bestiário', 'monstros já enfrentados', 'data-v="bestiary"')}${S.party && S.party.last ? it('navGo', 'Rever última batalha', '', 'data-v="replay"') : ''}
         <div class="nav-g">Meu herói · ${esc(me.name)}</div>${HERO_TABS.map(([k, n, sub]) => it('navGo', n + (k === 'habilidades' && me.points ? ` <span class="dot">${me.points}</span>` : ''), sub, `data-v="tab:${k}"`)).join('')}` : ''}
-        <div class="nav-g">Sala</div>${isCreator() && me ? it('navGo', 'Configurações', 'regras, heróis e convites', 'data-v="settings"') + it('navGo', 'Relatório semanal', '', 'data-v="report"') : ''}${canInvite() ? it('navGo', 'Convidar pessoas', 'link para a família', 'data-v="invite"') : ''}${me ? it('navGo', 'Tutorial', 'como tudo funciona', 'data-v="tutorial"') : ''}${me ? it('navGo', 'Trocar personagem', '', 'data-v="switchHero"') : ''}${it('navGo', 'Trocar de sala', '', 'data-v="leaveRoom"')}
+        <div class="nav-g">Sala</div>${isCreator() && me ? it('navGo', 'Configurações', 'regras, heróis e convites', 'data-v="settings"') + it('navGo', 'Relatório semanal', '', 'data-v="report"') : ''}${canInvite() ? it('navGo', 'Convidar pessoas', 'link para o pessoal', 'data-v="invite"') : ''}${me ? it('navGo', 'Tutorial', 'como tudo funciona', 'data-v="tutorial"') : ''}${me ? it('navGo', 'Trocar personagem', '', 'data-v="switchHero"') : ''}${it('navGo', 'Trocar de sala', '', 'data-v="leaveRoom"')}
         ${Acct.on() ? `<div class="nav-g">Conta</div>${it('navGo', 'Sair da conta', esc(S.acct.email), 'data-v="logout"')}` : ''}
       </div>` : ''}</div>`;
   }
@@ -3614,22 +3620,22 @@ s.small { opacity: .6; }
     const last = lsGet('guilda-last-room', null);
     if (needAcct()) {
       const inv = S.pendingInvite || sessGet('guilda-invite');
-      return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Tarefas da família viram aventura</div><h2>Entre na sua conta</h2>
-        <p class="muted">Cada pessoa da família usa a própria conta. Assim o seu personagem fica ligado a você e ninguém mais mexe nele.</p>
+      return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Tarefas viram aventura</div><h2>Entre na sua conta</h2>
+        <p class="muted">Cada pessoa usa a própria conta. Assim o seu personagem fica ligado a você e ninguém mais mexe nele.</p>
         ${inv ? `<div class="invite-hi">Você recebeu um convite para a sala <b class="num">${esc(inv)}</b>. Entre ou crie uma conta e a gente te leva até lá.</div>` : ''}</div>
         ${accountCard()}</section>`;
     }
-    return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Tarefas da família viram aventura</div><h2>Entre na sala da sua guilda</h2>
-      <p class="muted">Cada sala é uma guilda separada. Quem cria a sala vira o organizador e recebe um link para convidar a família.</p></div>
+    return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Tarefas viram aventura</div><h2>Entre na sala da sua guilda</h2>
+      <p class="muted">Cada sala é uma guilda separada. Quem cria a sala vira o organizador e recebe um link para convidar o pessoal: família, amigos ou o time do trabalho.</p></div>
       ${accountCard()}
       <div class="grid2"><form class="card" data-form="join"><div class="eyebrow">Já tenho um código</div><h3>Entrar numa sala</h3>
         <div class="field" style="margin-top:12px"><label for="room-code">Código da sala</label><input type="text" id="room-code" class="code-in" maxlength="6" placeholder="ABC123" autocomplete="off" autocapitalize="characters" value="${esc(S.joinDraft || '')}"></div>
         ${S.roomErr ? `<p class="small" style="color:var(--bad);margin-top:-8px">${esc(S.roomErr)}</p>` : ''}
         <div class="row"><button class="btn primary" type="submit">Entrar</button>${last ? `<button class="btn ghost" type="button" data-act="joinLast">Voltar para ${esc(last)}</button>` : ''}</div></form>
       <form class="card" data-form="newroom"><div class="eyebrow">Começar do zero</div><h3>Criar sala nova</h3>
-        <div class="field" style="margin-top:12px"><label for="room-name">Nome da guilda</label><input type="text" id="room-name" value="${esc((S.inputs || {})["room-name"] || "")}" maxlength="40" placeholder="Guilda da Família" autocomplete="off"></div>
+        <div class="field" style="margin-top:12px"><label for="room-name">Nome da guilda</label><input type="text" id="room-name" value="${esc((S.inputs || {})["room-name"] || "")}" maxlength="40" placeholder="Ex.: Família Silva, Time de Vendas" autocomplete="off"></div>
         <div class="field"><label for="room-slots">Vagas de heróis</label><select id="room-slots" class="txt sel">${slotOpts(5)}</select></div>
-        <p class="small muted" style="margin-top:-6px">Você vira o organizador: controla as configurações, pode criar heróis para quem não tem conta (como crianças pequenas) e convida a família por link.</p>
+        <p class="small muted" style="margin-top:-6px">Você vira o organizador: controla as configurações, pode criar heróis para quem não tem conta (como crianças pequenas) e convida o pessoal por link.</p>
         <button class="btn primary" type="submit">Criar sala</button></form></div></section>`;
   }
   const slotOpts = (cur, min) => Array.from({ length: MAX_SLOTS }, (_, i) => i + 1).filter((n) => !min || n >= min).map((n) => `<option value="${n}" ${n === cur ? 'selected' : ''}>${n} ${n === 1 ? 'herói' : 'heróis'}</option>`).join('');
@@ -3683,7 +3689,7 @@ s.small { opacity: .6; }
     return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Sala ${esc(S.room)}</div>${invited ? `<div class="invite-hi">Você foi convidado para <b>${esc((S.roomMeta && S.roomMeta.name) || 'a guilda')}</b>! ${full ? `A guilda já está cheia (${roomSlots()} heróis). Se um deles é seu, toque nele.` : 'Crie o seu herói ou traga um de outra sala.'}</div>` : ''}<h2>Quem está jogando?</h2><p class="muted">${acct ? `Escolha o seu personagem. Cada um é ligado a uma conta: só o dono e o organizador da sala jogam com ele.${sub}` : 'Escolha o seu personagem. Você só mexe nas tarefas, habilidades e itens dele.'}${S.party && !S.party.creatorId ? ' O primeiro herói criado vira o criador da sala.' : ''}</p></div>
       <div class="picklist">${cards}${canNew ? `<button class="pickme new" data-act="create"><div class="fig"><span class="plus">+</span></div><div class="nm">Criar herói</div><div class="cl">Vaga ${hs.length + 1} de ${roomSlots()}</div></button>` : ''}</div>
       ${impCard}
-      <p class="small muted" style="margin-top:16px">${canInvite() ? `<button class="btn sm" data-act="invite">Convidar com link</button> ou passe o código <b>${esc(S.room)}</b>.` : `Passe o código <b>${esc(S.room)}</b> para a família entrar na mesma sala.`}</p></section>`;
+      <p class="small muted" style="margin-top:16px">${canInvite() ? `<button class="btn sm" data-act="invite">Convidar com link</button> ou passe o código <b>${esc(S.room)}</b>.` : `Passe o código <b>${esc(S.room)}</b> para o pessoal entrar na mesma sala.`}</p></section>`;
   }
 
   function homeView() {
@@ -4211,7 +4217,7 @@ s.small { opacity: .6; }
         <form class="room-cfg" data-form="roomcfg"><div class="field"><label for="room-rename">Nome da sala</label><input type="text" id="room-rename" class="txt" maxlength="40" value="${esc((S.roomMeta && S.roomMeta.name) || '')}"></div>
           <div class="field"><label for="room-slots-cfg">Vagas de heróis</label><select id="room-slots-cfg" class="txt sel">${slotOpts(roomSlots(), Math.max(1, hs.length))}</select><div class="small muted" style="margin-top:4px">${hs.length} ocupada${hs.length === 1 ? '' : 's'}. Para ter menos vagas do que heróis, expulse alguém antes.</div></div>
           <div class="row"><button class="btn sm primary" type="submit">Salvar nome e vagas</button></div></form>
-        <p class="small" style="margin:14px 0 10px">Código para a família entrar: <b class="code-big">${esc(S.room)}</b></p>
+        <p class="small" style="margin:14px 0 10px">Código para o pessoal entrar: <b class="code-big">${esc(S.room)}</b></p>
         <div class="row">${canInvite() ? '<button class="btn sm primary" data-act="invite">Link de convite</button>' : ''}<button class="btn sm" data-act="copyCode">Copiar código</button>${hs.length ? '<button class="btn sm ghost" data-act="forceBattle">Prévia da batalha</button>' : ''}</div>
         <p class="small muted" style="margin:8px 0 0">A prévia mostra como a batalha desta noite terminaria se fosse agora. Não dá recompensa nem muda o estágio.</p></section>
       ${requestsAdmin()}
@@ -4860,7 +4866,7 @@ s.small { opacity: .6; }
       try {
         const r = await serverCall('api_snap_get', S.room, el.dataset.id); const it = (S.snaps || []).find((x) => x.id === el.dataset.id) || {};
         const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([r.data], { type: 'application/json' }));
-        a.download = `guilda-${S.room}-${new Date(it.at || Date.now()).toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`; document.body.appendChild(a); a.click(); a.remove();
+        a.download = `dungeons-and-tasks-${S.room}-${new Date(it.at || Date.now()).toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`; document.body.appendChild(a); a.click(); a.remove();
       } catch (e) { showToast(esc(String(e.message || e))); }
     },
     snapAsk(el) { if (masterLocked()) return; S.modal = { type: 'restore', id: el.dataset.id }; render(); setTimeout(() => { const i = document.getElementById('restore-in'); if (i) i.focus(); }, 30); },
@@ -4875,7 +4881,7 @@ s.small { opacity: .6; }
       const fallback = () => { const i = document.getElementById('invite-url'); if (i) { i.focus(); i.select(); try { document.execCommand('copy'); ok(); return; } catch (e) { /* segue */ } } showToast('Selecione o link e copie.'); };
       try { navigator.clipboard.writeText(url).then(ok, fallback); } catch (e) { fallback(); }
     },
-    shareInvite() { const url = inviteUrl(); try { navigator.share({ title: (S.roomMeta && S.roomMeta.name) || 'Guilda da Família', text: inviteText(), url }).catch(() => {}); } catch (e) { /* sem compartilhar */ } },
+    shareInvite() { const url = inviteUrl(); try { navigator.share({ title: (S.roomMeta && S.roomMeta.name) || APP_NAME, text: inviteText(), url }).catch(() => {}); } catch (e) { /* sem compartilhar */ } },
     copyCode() { const c = S.room; try { navigator.clipboard.writeText(c).then(() => showToast(`Código <b>${c}</b> copiado.`), () => showToast(`Código da sala: <b>${c}</b>`)); } catch (e) { showToast(`Código da sala: <b>${c}</b>`); } },
     create() { if (!canCreateHero()) return; S.draft = { name: '', cls: 'guerreiro', look: randomLook('humano') }; S.view = 'create'; render(); scrollTo(0, 0); },
     open(el) { if (el.dataset.id !== S.me) return; S.heroId = el.dataset.id; S.view = 'hero'; S.tab = 'tarefas'; S.selSkill = null; tidyAll(); render(); scrollTo(0, 0); },
@@ -5173,7 +5179,7 @@ s.small { opacity: .6; }
       Acct.call('pass', S.acct.token, o, n).then((r) => { Acct.keep(r); S.passOpen = false; render(); showToast('Senha trocada. Os outros aparelhos vão pedir login de novo.'); }).catch((e) => { S.authErr = String(e.message || e); render(); });
       return;
     }
-    if (form === 'newroom') { if (needAcct()) return; createRoom(document.getElementById('room-name').value.trim() || 'Guilda da Família', Number((document.getElementById('room-slots') || {}).value) || 5); return; }
+    if (form === 'newroom') { if (needAcct()) return; createRoom(document.getElementById('room-name').value.trim() || 'Minha guilda', Number((document.getElementById('room-slots') || {}).value) || 5); return; }
     if (form === 'reset') {
       const e = document.getElementById('acct-email'), rc = document.getElementById('acct-rc'), pw = document.getElementById('acct-pass');
       if (!e.value.trim()) { e.focus(); return; } if (!rc.value.trim()) { rc.focus(); return; } if (!pw.value) { pw.focus(); return; }

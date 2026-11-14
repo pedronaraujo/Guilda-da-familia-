@@ -1,5 +1,5 @@
 /**
- * Guilda da Família — servidor na Cloudflare.
+ * Dungeons and Tasks — servidor na Cloudflare.
  *
  * O site (public/index.html) é servido como arquivo estático. Os pedidos para /api/<função>
  * chegam aqui. Cada sala da guilda vive num Durable Object próprio (um "quartinho" com banco
@@ -44,7 +44,7 @@ export class Room extends DurableObject {
   async meta() { return (await this.ctx.storage.get('meta')) || null; }
   async create(room, meta, party, acct) {
     if (await this.ctx.storage.get('meta')) return { ok: false };
-    meta = Object.assign({}, meta, { slots: slotsOf(meta && meta.slots), name: String((meta && meta.name) || 'Guilda da Família').slice(0, 40), owner: acct || null });
+    meta = Object.assign({}, meta, { slots: slotsOf(meta && meta.slots), name: String((meta && meta.name) || 'Minha guilda').slice(0, 40), owner: acct || null });
     await this.ctx.storage.put({ meta, 'd:party/main': party });
     await this.bump();
     return { ok: true };

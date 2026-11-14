@@ -1,4 +1,4 @@
-# Guilda da Família: instruções para o Claude
+# Dungeons and Tasks: instruções para o Claude
 
 Responda ao Pedro sempre em português do Brasil.
 

@@ -91,9 +91,28 @@
   function regionIndex(stage) { return Math.floor((stage - 1) / 5) % D.REGIONS.length; }
   // Encontro procedural: o estágio dá um "orçamento" de força que é dividido entre
   // inimigos comuns, elites (um nível acima) e bandos (vários membros numa unidade).
-  function buildEnemies(stage, heroCount, mul, special) {
-    mul = (mul || 1) * (special && special.mul ? special.mul : 1);
+  /* Calibração: cada tamanho de grupo e estágio tem um ajuste para que um grupo "no nível esperado"
+     tenha a mesma chance de vitória com a mesma régua, seja de 1 ou de 6 heróis. Tabela gerada por
+     test/calibrate.js (valores por estágio 1..CAL_MAX; depois disso vale o último). */
+  let CAL = null; // preenchida por calibration.js
+  function calOf(n, stage) {
+    if (!CAL) return 1; const row = CAL[Math.max(1, Math.min(6, n))] || CAL[5]; const max = row.length;
+    if (stage <= max) return row[Math.max(1, stage) - 1] || 1;
+    // além da tabela: segue a tendência dos últimos 20 estágios
+    const g = Math.pow(row[max - 1] / row[max - 21], 1 / 20);
+    return row[max - 1] * Math.pow(g, stage - max);
+  }
+  // Variação do dia: os inimigos de cada noite vêm um pouco mais fortes ou mais fracos (sorte do dia).
+  // É o que faz a chance de vitória cair aos poucos quando a régua sobe, em vez de virar de uma vez.
+  const LUCK_SD = 0.27;
+  function dayLuck(seed) {
+    const r = rng((seed ^ 0x9e3779b9) >>> 0); const u = Math.max(1e-9, r()), v = r();
+    const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    return Math.exp(LUCK_SD * Math.max(-2.5, Math.min(2.5, z)));
+  }
+  function buildEnemies(stage, heroCount, mul, special, noCal) {
     heroCount = Math.max(1, heroCount || 5);
+    mul = (mul || 1) * (special && special.mul ? special.mul : 1) * (noCal ? 1 : calOf(heroCount, stage));
     const r = rng(hashStr('stage' + stage));
     const ri = regionIndex(stage), reg = D.REGIONS[ri];
     const k = (stage - 1) % 5;
@@ -145,14 +164,15 @@
   function regionOf(stage) { return D.REGIONS[regionIndex(stage)]; }
 
   /* ---------- Batalha ---------- */
-  function simulate(heroes, stage, seed, withLog, mul, special) {
+  function simulate(heroes, stage, seed, withLog, mul, special, opts) {
     const r = rng(seed);
+    const luck = opts && opts.noLuck ? 1 : dayLuck(seed);
     const partyDef = heroes.reduce((s, h) => s + heroStats(h).partyDefPct, 0);
     const H = heroes.map((h) => {
       const st = heroStats(h, { defPct: partyDef });
       return Object.assign(st, { id: h.id, side: 'h', name: h.name, cls: h.cls, look: h.look, cosmetics: h.cosmetics });
     });
-    const E = buildEnemies(stage, heroes.length, mul, special);
+    const E = buildEnemies(stage, heroes.length, (mul || 1) * luck, special, opts && opts.noCal);
     const all = H.concat(E);
     for (const u of all) {
       Object.assign(u, { hp: u.maxHp, shield: 0, cds: {}, uses: {}, dots: [], stun: 0, chill: 0, taunt: 0, buffs: [], revived: false, ko: false });
@@ -311,7 +331,7 @@
     }
     if (!result) result = 'loss';
     return {
-      win: result === 'win', rounds: Math.min(round, MAXR), log,
+      win: result === 'win', rounds: Math.min(round, MAXR), log, luck,
       units: all.map((u) => ({ id: u.id, side: u.side, name: u.name, maxHp: u.maxHp, cls: u.cls, sid: u.sid, tier: u.tier, shape: u.shape, color: u.color, glow: u.glow, boss: u.boss, big: u.big, crown: u.crown, horns: u.horns, wings: u.wings, lava: u.lava, small: u.small, count: u.count || 1, memberHp: u.memberHp })),
       survivors: alive('h').length,
     };
@@ -325,5 +345,5 @@
   }
   function goldReward(stage) { return Math.round((20 + 8 * stage) * (stage % 5 === 0 ? 2.5 : 1)); }
 
-  G.ENGINE = { tierInfo, regionIndex, rng, hashStr, levelFromXp, canLearn, heroStats, powerScore, stageLevel, buildEnemies, regionOf, simulate, winChance, goldReward, ENEMY_K };
+  G.ENGINE = { calOf, dayLuck, LUCK_SD, setCal: (t) => { CAL = t; }, tierInfo, regionIndex, rng, hashStr, levelFromXp, canLearn, heroStats, powerScore, stageLevel, buildEnemies, regionOf, simulate, winChance, goldReward, ENEMY_K };
 })(typeof window !== 'undefined' ? window : globalThis);

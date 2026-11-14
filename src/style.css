@@ -761,3 +761,5 @@ s.small { opacity: .6; }
 .sel { padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0,0,0,.25); color: inherit; font: inherit; width: 100%; }
 .bday-fixed { padding: 8px 12px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
 .room-cfg .field { margin-bottom: 10px; }
+.hidden { display: none !important; }
+.perm-note { margin-bottom: 14px; }

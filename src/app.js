@@ -296,6 +296,15 @@
   const isMine = (h) => !!h && (!Store.server || (!!h.owner && h.owner === myAcct()));
   // pode jogar com o herói: o dono, ou o organizador (que cuida dos heróis de quem não tem conta)
   const canControl = (h) => !!h && (!Store.server || h.owner === myAcct() || orgAcct());
+  /* quem pode criar tarefas (pessoais e do quadro) e recompensas: organizadores sempre podem */
+  const PERM_DEF = { tasks: { mode: 'all', heroes: [] }, rewards: { mode: 'org', heroes: [] } };
+  const permCfg = (k) => Object.assign({}, PERM_DEF[k], ((S.party && S.party.perms) || {})[k] || {});
+  function canMake(k, heroId) {
+    const id = heroId || S.me; if (!id) return false;
+    if (isCreator(id) || (Store.server && orgAcct())) return true;
+    const c = permCfg(k); return c.mode === 'all' || (c.mode === 'some' && (c.heroes || []).includes(id));
+  }
+  const permNote = (k) => { const c = permCfg(k); return c.mode === 'org' ? 'só os organizadores' : 'só alguns heróis'; };
   const MAX_SLOTS = 6;
   const roomSlots = () => Math.max(1, Math.min(MAX_SLOTS, Math.round(Number(S.roomMeta && S.roomMeta.slots) || D.MAX_HEROES)));
   const canCreateHero = () => heroList().length < roomSlots() && (!Store.server || orgAcct() || !heroList().some((h) => h.owner === myAcct()));
@@ -790,7 +799,7 @@
     const hs = heroList(); if (!hs.length) { S.chance = null; return; }
     const key = stage() + '|' + level().mul + '|' + hs.map((h) => [h.id, h.level, ancOf(h).id, JSON.stringify(h.skills), JSON.stringify(h.gear), h.mastery].join(':')).join('|');
     if (key === S.chanceKey) return;
-    S.chanceKey = key; S.chance = E.winChance(hs, stage(), 60, level().mul);
+    S.chanceKey = key; S.chance = E.winChance(hs, stage(), 120, level().mul);
   }
 
   /* ---------------- Render ---------------- */
@@ -1111,7 +1120,7 @@
       <button class="done-btn" data-act="${blocked ? 'noop' : 'doneBoard'}" data-id="${t.id}" aria-label="${t.done ? 'Cumprida' : 'Cumprir ' + esc(t.title)}" ${blocked ? 'disabled' : ''}${notMine && !t.done ? ` title="Missão de ${esc(who.map((id) => S.heroes[id].name).join(', '))}"` : ''}>${t.done ? '✓' : mine ? '½' : ''}</button>
       <div><div class="t">${esc(t.title)}${boardFaces(t)}</div><div class="sub">${meta}</div></div>
       <div class="xp num">${xpTxt}</div>
-      <div class="tact">${canUndoBoard(t) ? `<button class="del undo" data-act="undoBoard" data-id="${t.id}" aria-label="Desfazer: ${esc(t.title)}" title="Desfazer (não fiz)">↺</button>` : canReopen(t) ? `<button class="del undo" data-act="reopenBoard" data-id="${t.id}" aria-label="Reabrir: ${esc(t.title)}" title="Reabrir (tira o XP de quem cumpriu)">↺</button>` : ''}${!t.done && !parts.length ? `<button class="del" data-act="editTask" data-scope="board" data-id="${t.id}" aria-label="Editar missão" title="Editar">✎</button>` : ''}<button class="del" data-act="delBoard" data-id="${t.id}" aria-label="Apagar missão" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button></div></li>`;
+      <div class="tact">${canUndoBoard(t) ? `<button class="del undo" data-act="undoBoard" data-id="${t.id}" aria-label="Desfazer: ${esc(t.title)}" title="Desfazer (não fiz)">↺</button>` : canReopen(t) ? `<button class="del undo" data-act="reopenBoard" data-id="${t.id}" aria-label="Reabrir: ${esc(t.title)}" title="Reabrir (tira o XP de quem cumpriu)">↺</button>` : ''}${!t.done && !parts.length && canMake('tasks') ? `<button class="del" data-act="editTask" data-scope="board" data-id="${t.id}" aria-label="Editar missão" title="Editar">✎</button>` : ''}${canMake('tasks') ? `<button class="del" data-act="delBoard" data-id="${t.id}" aria-label="Apagar missão" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button>` : ''}</div></li>`;
   }
   function boardFilterBar() {
     const hs = heroList(); if (hs.length < 2) return '';
@@ -1124,7 +1133,8 @@
     const t = today(); const all = boardList().filter(boardFilterOk);
     const open = all.filter((x) => !x.done && !boardFuture(x)); const done = all.filter((x) => x.done === t); const later = all.filter(boardFuture);
     return `<section class="card board" style="margin-bottom:18px"><div class="card-h"><div><div class="eyebrow">Quadro da guilda</div><h3>Missões da guilda</h3></div><span class="small muted">Escolha os responsáveis ou deixe para qualquer herói. Quem cumprir primeiro leva a experiência.</span></div>
-      <form class="addtask" data-form="board"><div class="row"><input type="text" id="board-title" value="${esc((S.inputs || {})["board-title"] || "")}" maxlength="80" placeholder="Ex.: Tirar o lixo, passear com o cachorro, regar as plantas" autocomplete="off" style="flex:1;min-width:200px" ${S.readOnly ? 'disabled' : ''}>
+      ${S.me && !canMake('tasks') ? `<p class="small muted" style="margin:0 0 10px">Nesta sala, ${permNote('tasks')} fixam missões no quadro.</p>` : ''}
+      <form class="addtask${!S.me || canMake('tasks') ? '' : ' hidden'}" data-form="board"><div class="row"><input type="text" id="board-title" value="${esc((S.inputs || {})["board-title"] || "")}" maxlength="80" placeholder="Ex.: Tirar o lixo, passear com o cachorro, regar as plantas" autocomplete="off" style="flex:1;min-width:200px" ${S.readOnly ? 'disabled' : ''}>
         <button class="btn primary" type="submit" ${S.readOnly ? 'disabled' : ''}>Fixar no quadro</button></div>
         <div class="row"><div class="seg" role="group" aria-label="Dificuldade">${diffButtons()}</div><label class="check"><input type="checkbox" id="board-duo" ${S.newDuo ? 'checked' : ''}> Em dupla</label></div>
         ${whoPicker(S.boardWho || [], 'boardWho')}
@@ -1306,7 +1316,7 @@
       <button class="done-btn" data-act="${t.done || t.pending ? 'noop' : 'done'}" data-id="${t.id}" aria-label="${t.done ? 'Concluída' : 'Concluir ' + esc(t.title)}" ${S.readOnly || t.done || t.pending ? 'disabled' : ''}>${t.done ? '✓' : t.pending ? '…' : ''}</button>
       <div><div class="t">${esc(t.title)}</div><div class="sub">${taskMeta(t, x)}</div></div>
       <div class="xp num">${xpTxt}</div>
-      <div class="tact">${(t.done === today() || t.pending) && !S.readOnly ? `<button class="del undo" data-act="undoTask" data-id="${t.id}" aria-label="Desfazer: ${esc(t.title)}" title="Desfazer (não fiz)">↺</button>` : ''}${!t.chore && !t.done && !t.pending ? `<button class="del" data-act="editTask" data-scope="me" data-id="${t.id}" aria-label="Editar tarefa" title="Editar">✎</button>` : ''}${t.chore ? '' : `<button class="del" data-act="delTask" data-id="${t.id}" aria-label="Apagar tarefa" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button>`}</div></li>`;
+      <div class="tact">${(t.done === today() || t.pending) && !S.readOnly ? `<button class="del undo" data-act="undoTask" data-id="${t.id}" aria-label="Desfazer: ${esc(t.title)}" title="Desfazer (não fiz)">↺</button>` : ''}${!t.chore && !t.done && !t.pending && canMake('tasks') ? `<button class="del" data-act="editTask" data-scope="me" data-id="${t.id}" aria-label="Editar tarefa" title="Editar">✎</button>` : ''}${t.chore || !canMake('tasks') ? '' : `<button class="del" data-act="delTask" data-id="${t.id}" aria-label="Apagar tarefa" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button>`}</div></li>`;
   }
   function dayChips(sel, act) { return `<div class="days" role="group" aria-label="Dias da semana">${D.WEEKDAYS.map((n, i) => `<button type="button" class="dchip" data-act="${act || 'day'}" data-v="${i}" aria-pressed="${(sel || []).includes(i)}">${n}</button>`).join('')}</div>`; }
   function tasksTab(h) {
@@ -1325,7 +1335,8 @@
       ${bdayCta(h)}
       ${ch.ready ? `<section class="chest-cta"><div class="chest-ic">${chestSvg(false)}</div><div><b>Baú do dia liberado!</b><div class="small">Você cumpriu todas as tarefas de hoje.</div></div><button class="btn primary" data-act="openChest">Abrir baú</button></section>`
         : ch.opened ? '' : ch.total >= 2 ? `<section class="chest-cta dim"><div class="chest-ic">${chestSvg(false)}</div><div><b>Baú do dia</b><div class="small">${ch.done} de ${ch.total} tarefas de hoje feitas. Termine todas para abrir.</div><div class="bar" style="margin-top:6px"><i style="width:${Math.round((ch.done / ch.total) * 100)}%"></i></div></div></section>` : ''}
-      <form class="card addtask" data-form="task"><div class="eyebrow">Nova tarefa</div>
+      ${canMake('tasks', h.id) ? '' : `<div class="card perm-note"><div class="eyebrow">Nova tarefa</div><p class="small muted" style="margin:6px 0 0">Nesta sala, ${permNote('tasks')} criam tarefas. As suas tarefas obrigatórias e as missões do quadro aparecem aqui.</p></div>`}
+      <form class="card addtask${canMake('tasks', h.id) ? '' : ' hidden'}" data-form="task"><div class="eyebrow">Nova tarefa</div>
         <input type="text" id="task-title" value="${esc((S.inputs || {})["task-title"] || "")}" maxlength="80" placeholder="Ex.: Arrumar a cama, estudar 30 min, lavar a louça" autocomplete="off" ${S.readOnly ? 'disabled' : ''}>
         <div class="row"><div class="seg" role="group" aria-label="Dificuldade">${diffButtons()}</div></div>
         <div class="row"><div class="seg" role="group" aria-label="Para quem"><button type="button" data-act="target" data-v="me" aria-pressed="${S.newTarget === 'me'}">Só para ${esc(h.name)}</button><button type="button" data-act="target" data-v="guild" aria-pressed="${S.newTarget === 'guild'}">Quadro da guilda</button></div>
@@ -1439,14 +1450,15 @@
         const lim = [r.perWeek ? `${r.perWeek}x por semana` : '', r.stock != null ? `${r.stock} em estoque` : ''].filter(Boolean).join(' · ');
         return `<li class="reward${ok ? ' ready' : ''}"><div><div class="t">${esc(r.name)}</div>${lim ? `<div class="small muted">${lim}</div>` : ''}<div class="bar" style="margin-top:6px"><i style="width:${pct}%"></i></div></div><div class="xp num">${r.cost} XP</div>
           <button class="btn sm ${ok ? 'primary' : ''}" data-act="askRedeem" data-id="${r.id}" ${ok && !S.readOnly ? '' : 'disabled'}>${blk || 'Pedir'}</button></li>`; }).join('')}</ul>`
-      : `<div class="empty-note">Ainda não há recompensas cadastradas. Os criadores da sala cadastram nas configurações.</div>`}</div>
+      : `<div class="empty-note">Ainda não há recompensas cadastradas.${canMake('rewards', h.id) ? ' Cadastre a primeira abaixo.' : ' Os organizadores da sala cadastram.'}</div>`}
+      ${canMake('rewards', h.id) && !isCreator(h.id) ? `<div style="margin-top:14px">${rewardsAdmin(false, true)}</div>` : ''}</div>
       <div class="card"><div class="eyebrow">Pedidos de ${esc(h.name)}</div>
       ${mine.length ? `<ul class="hist" style="margin-top:10px">${mine.map((q) => `<li><span>${fmtDay(q.day)} · ${esc(q.name)} <span class="small muted">· ${q.cost} XP</span></span><span class="tag ${st[q.status][1]}">${st[q.status][0]}</span></li>`).join('')}</ul>` : '<p class="muted small">Nenhum pedido ainda.</p>'}
       <div class="stats" style="margin-top:12px"><div class="stat"><div class="v num">${(h.stats && h.stats.xp) || 0}</div><div class="l">XP ganho no total</div></div><div class="stat"><div class="v num">${h.redeemed || 0}</div><div class="l">XP usado em pedidos</div></div></div></div></div>`;
   }
-  function rewardsAdmin(locked) {
-    const list = rewardList();
-    return `<div class="field" style="margin:0"><h3 style="margin-bottom:10px">Recompensas da vida real</h3>
+  function rewardsAdmin(locked, mineOnly) {
+    const list = mineOnly ? rewardList().filter((r) => r.by === S.me) : rewardList();
+    return `<div class="field" style="margin:0"><h3 style="margin-bottom:10px">${mineOnly ? 'Cadastrar recompensa' : 'Recompensas da vida real'}</h3>
       <form class="row" data-form="reward"><input type="text" id="rw-name" value="${esc((S.inputs || {})["rw-name"] || "")}" maxlength="60" placeholder="Ex.: Passeio no parquinho" autocomplete="off" class="txt" style="flex:1 1 100%" ${locked || S.readOnly ? 'disabled' : ''}>
         <label class="sr" for="rw-week">Limite por semana</label><input type="number" id="rw-week" min="1" max="50" step="1" placeholder="Por semana (opcional)" class="txt" style="flex:1;min-width:140px" ${locked || S.readOnly ? 'disabled' : ''}>
         <label class="sr" for="rw-stock">Estoque</label><input type="number" id="rw-stock" min="0" max="999" step="1" placeholder="Estoque (opcional)" class="txt" style="flex:1;min-width:130px" ${locked || S.readOnly ? 'disabled' : ''}>
@@ -1503,9 +1515,10 @@
       <section class="card"><div class="card-h"><h3>Dificuldade</h3><span class="chip"><b id="diff-name">${lv.name}</b> · <span id="diff-pct" class="num">${Math.round(mul * 100)}%</span></span></div>
         <input type="range" id="diff-range" class="range" min="0.6" max="1.8" step="0.05" value="${mul}" aria-label="Dificuldade das batalhas">
         <div class="range-lbl small muted">${[[0.6, 'Tranquila'], [1, 'Normal'], [1.35, 'Épica'], [1.8, 'Lendária']].map(([v, n]) => `<span style="left:${((v - 0.6) / 1.2) * 100}%">${n}</span>`).join('')}</div>
-        <p class="small" style="margin:10px 0 0"><span id="diff-blurb">${esc(lv.blurb)}</span> Chance de vitória esta noite com essa dificuldade: <b id="diff-chance" class="num">${hs.length ? Math.round(E.winChance(hs, stage(), 40, mul) * 100) + '%' : '–'}</b>.</p>
-        <p class="small muted" style="margin:6px 0 0">Multiplica a vida e o poder de todos os inimigos. Vale a partir da próxima batalha.</p></section>
+        <p class="small" style="margin:10px 0 0"><span id="diff-blurb">${esc(lv.blurb)}</span> Chance de vitória esta noite com essa dificuldade: <b id="diff-chance" class="num">${hs.length ? Math.round(E.winChance(hs, stage(), 100, mul) * 100) + '%' : '–'}</b>.</p>
+        <p class="small muted" style="margin:6px 0 0">Deixa os inimigos mais fortes ou mais fracos. A força deles já se ajusta ao número de heróis da sala, e cada noite tem um pouco de sorte (inimigos um pouco mais fortes ou mais fracos), então subir um pouco a régua tira só um pouco da chance. Vale a partir da próxima batalha.</p></section>
       ${approvalSection(hs)}
+      ${permSection(hs)}
       <section class="card"><div class="card-h"><h3>Experiência por dia</h3>${xpCap() ? `<span class="chip">Limite: <b class="num">${xpCap()} XP</b></span>` : '<span class="chip">Sem limite</span>'}</div>
         <form data-form="xpcfg" class="xpcfg">
           <div class="field"><label for="cap-in">Limite diário de XP por personagem</label><div class="row"><input type="number" id="cap-in" class="time-in num-in wide" min="0" max="5000" step="10" placeholder="Sem limite" value="${xpCap() || ''}"><span class="small muted">XP das tarefas. Deixe vazio ou 0 para não ter limite.</span></div></div>
@@ -1554,6 +1567,14 @@
     return `<section class="card"><div class="card-h"><h3>Pedidos de recompensa</h3>${open.length ? `<span class="tag wait">${open.length} em aberto</span>` : ''}</div>
       ${open.length ? `<ul class="approvals">${open.map((q) => { const h = S.heroes[q.heroId]; return `<li><span class="ic">${h ? A.heroSvg(h, { noPet: true, noWeapon: true }) : ''}</span><span><b>${esc(q.heroName)}</b> · ${esc(q.name)}<br><span class="small muted">${fmtDay(q.day)} · ${q.cost} XP · ${q.status === 'pending' ? 'aguardando aprovação' : 'aprovado, falta entregar'}</span></span>
         <span class="row" style="gap:6px">${q.status === 'pending' ? `<button class="btn sm primary" data-act="reqOk" data-id="${q.id}">Aprovar</button><button class="btn sm ghost" data-act="reqNo" data-id="${q.id}">Recusar</button>` : `<button class="btn sm primary" data-act="reqDone" data-id="${q.id}">Marcar entregue</button>`}</span></li>`; }).join('')}</ul>` : '<p class="small muted" style="margin:0">Quando alguém pedir uma recompensa, o pedido aparece aqui.</p>'}</section>`;
+  }
+  function permSection(hs) {
+    const kids = hs.filter((h) => !isCreator(h.id));
+    const row = (k, title, sub) => { const c = permCfg(k); return `<div class="field" style="margin:0 0 12px"><span class="lbl">${title}</span><div class="opts">${[['all', 'Todos'], ['org', 'Só organizadores'], ['some', 'Escolher']].map(([v, n]) => `<button class="opt" data-act="setPerm" data-k="${k}" data-v="${v}" aria-pressed="${c.mode === v}">${n}</button>`).join('')}</div>
+      ${c.mode === 'some' ? `<div class="opts" style="margin-top:8px">${kids.length ? kids.map((h) => `<label class="check"><input type="checkbox" data-act="permHero" data-k="${k}" value="${h.id}" ${(c.heroes || []).includes(h.id) ? 'checked' : ''}> ${esc(h.name)}</label>`).join('') : '<span class="small muted">Ainda não há outros heróis.</span>'}</div>` : ''}<div class="small muted" style="margin-top:4px">${sub}</div></div>`; };
+    return `<section class="card"><div class="card-h"><h3>Quem pode criar</h3><span class="small muted">Organizadores sempre podem.</span></div>
+      ${row('tasks', 'Tarefas (pessoais e missões do quadro)', 'Quem não pode criar também não edita nem apaga tarefas. As tarefas obrigatórias continuam aparecendo para todos.')}
+      ${row('rewards', 'Recompensas da vida real', 'Quem pode cadastra recompensas na aba Recompensas do próprio herói. Os pedidos continuam passando pela aprovação dos organizadores.')}</section>`;
   }
   function approvalSection(hs) {
     const c = approvalCfg(); const items = pendingItems();
@@ -2237,18 +2258,20 @@
     editTask(el) {
       const scope = el.dataset.scope, id = el.dataset.id;
       const t = scope === 'me' ? (hero().tasks || []).find((x) => x.id === id) : scope === 'board' ? S.board[id] : S.chores[id];
-      if (!t) return; if (scope === 'chore' && masterLocked()) return;
+      if (!t) return; if (scope === 'chore' && masterLocked()) return; if (scope !== 'chore' && !canMake('tasks')) return;
       S.modal = { type: 'editTask', scope, id, title: t.title, diff: t.diff, freq: scope === 'chore' && freqOf(t) === 'once' ? 'daily' : freqOf(Object.assign({ chore: scope === 'chore' }, t)), days: (t.days || []).slice(), every: t.every || 7, start: t.start || null, dom: t.dom || null, from: t.from && t.from > today() ? t.from : t.created > today() ? t.created : null, due: t.due || '', duo: !!t.duo, who: whoOf(t) }; render();
     },
     edDiff(el) { S.modal.diff = el.dataset.v; keepEdit(); render(); },
     edDay(el) { const v = Number(el.dataset.v); const m = S.modal; keepEdit(); m.days = m.days.includes(v) ? m.days.filter((x) => x !== v) : m.days.concat(v); render(); },
     edClearDue() { keepEdit(); S.modal.due = ''; render(); },
+    setPerm(el) { if (masterLocked()) return; const p = clone(S.party || newParty()); p.perms = Object.assign({}, p.perms || {}); p.perms[el.dataset.k] = Object.assign({}, permCfg(el.dataset.k), { mode: el.dataset.v }); Store.saveParty(p); render(); },
+    permHero(el) { if (masterLocked()) { render(); return; } const k = el.dataset.k; const p = clone(S.party || newParty()); p.perms = Object.assign({}, p.perms || {}); const c = permCfg(k); const set = new Set(c.heroes || []); if (el.checked) set.add(el.value); else set.delete(el.value); p.perms[k] = Object.assign({}, c, { heroes: [...set] }); Store.saveParty(p); render(); },
     setApproval(el) { if (masterLocked()) return; const p = clone(S.party); p.approval = Object.assign({ heroes: [] }, p.approval || {}, { mode: el.dataset.v }); Store.saveParty(p); render(); },
     approvalHero(el) { if (masterLocked()) return; const p = clone(S.party); const c = Object.assign({ mode: 'some', heroes: [] }, p.approval || {}); const set = new Set(c.heroes); if (el.checked) set.add(el.value); else set.delete(el.value); c.heroes = [...set]; p.approval = c; Store.saveParty(p); render(); },
     approve(el) { decide(el, true); },
     reject(el) { decide(el, false); },
     undo() { if (!S.undo) return; const u = S.undo; S.undo = null; S.toast = null; if (S.modal && S.modal.type === 'levelup') S.modal = null; Store.saveHero(u.before); if (u.board) Store.setDoc('board/' + u.board.id, u.board); render(); },
-    delTask(el) { const h = hero(); h.tasks = h.tasks.filter((x) => x.id !== el.dataset.id); saveCur(h); },
+    delTask(el) { if (!canMake('tasks')) return; const h = hero(); h.tasks = h.tasks.filter((x) => x.id !== el.dataset.id); saveCur(h); },
     selSkill(el) { S.selSkill = el.dataset.v; render(); },
     learn(el) {
       const h = hero(); const s = D.CLASSES[h.cls].skillMap[el.dataset.v]; if (!E.canLearn(h, s).ok) return;
@@ -2348,14 +2371,14 @@
     toggleSound() { Sound.toggle(); document.querySelectorAll('[data-act="toggleSound"]').forEach((b) => { b.textContent = Sound.on ? 'Som ligado' : 'Som desligado'; }); if (!(S.modal && S.modal.type === 'replay')) render(); },
     bestiary() { S.view = 'bestiary'; render(); scrollTo(0, 0); },
 
-    delReward(el) { if (masterLocked()) return; Store.delDoc('rewards/' + el.dataset.id); render(); },
+    delReward(el) { const r = S.rewards[el.dataset.id]; if (!(isCreator() ? !masterLocked() : r && r.by === S.me && canMake('rewards'))) return; Store.delDoc('rewards/' + el.dataset.id); render(); },
     boardWho(el) { S.boardWho = toggleWho(S.boardWho || [], el.value); render(); },
     edWho(el) { const m = S.modal; if (!m || m.type !== 'editTask') return; keepEdit(); const d = document.getElementById('ed-duo'); if (d) m.duo = d.checked; m.who = toggleWho(m.who || [], el.value); render(); },
     pickBoard(el) { if (!heroList().length) { showToast('Crie um herói primeiro para cumprir missões.'); return; } S.modal = { type: 'pickHero', taskId: el.dataset.id }; render(); },
     doneBoard(el) { if (!S.me) return; completeBoard(el.dataset.id, S.me); },
     
     doneBoardAs(el) { const tid = S.modal.taskId; S.modal = null; render(); if (!canControl(S.heroes[el.dataset.id])) return; completeBoard(tid, el.dataset.id); },
-    delBoard(el) { Store.delDoc('board/' + el.dataset.id); render(); },
+    delBoard(el) { if (!canMake('tasks')) return; Store.delDoc('board/' + el.dataset.id); render(); },
     askPin() { actions.settings(); },
     toggleCo(el) {
       if (masterLocked() || !isMainCreator()) return;
@@ -2390,7 +2413,7 @@
     if (el.id === 'diff-range') {
       const v = Number(el.value); S.diffPreview = v; const lv = levelFor(v);
       document.getElementById('diff-name').textContent = lv.name; document.getElementById('diff-pct').textContent = Math.round(v * 100) + '%'; document.getElementById('diff-blurb').textContent = lv.blurb;
-      clearTimeout(diffTimer); diffTimer = setTimeout(() => { const hs = heroList(); const c = document.getElementById('diff-chance'); if (c && hs.length) c.textContent = Math.round(E.winChance(hs, stage(), 40, v) * 100) + '%'; }, 120);
+      clearTimeout(diffTimer); diffTimer = setTimeout(() => { const hs = heroList(); const c = document.getElementById('diff-chance'); if (c && hs.length) c.textContent = Math.round(E.winChance(hs, stage(), 100, v) * 100) + '%'; }, 120);
     }
     if (el.dataset.input === 'name') { S.draft.name = el.value; const btn = document.querySelector('[data-act="saveHero"]'); if (btn) btn.disabled = !el.value.trim(); const p = document.querySelector('.preview h2'); if (p) p.textContent = el.value || 'Sem nome'; }
     if (el.dataset.input === 'bday' && S.draft) S.draft.birth = /^\d{4}-\d{2}-\d{2}$/.test(el.value) ? el.value : null;
@@ -2470,16 +2493,19 @@
       inp.value = ''; clearInput(inp.id); render(); showToast(`<span>Tarefa obrigatória: <b>${esc(title)}</b></span>`); return;
     }
     if (form === 'reward') {
-      if (masterLocked()) return actions.askPin();
+      if (!canMake('rewards')) { showToast(`Nesta sala, ${permNote('rewards')} criam recompensas.`); return; }
+      if (isCreator() && masterLocked()) return actions.askPin();
       const n = document.getElementById('rw-name'), c = document.getElementById('rw-cost');
       const name = n.value.trim(), cost = Math.round(Number(c.value));
       if (!name) { n.focus(); return; } if (!(cost > 0)) { c.focus(); return; }
       const wk = Math.round(Number(document.getElementById('rw-week').value)) || null; const stv = document.getElementById('rw-stock').value; const stock = stv === '' ? null : Math.max(0, Math.round(Number(stv)));
-      const id = 'r' + uidGen(); Store.setDoc('rewards/' + id, { id, name, cost, perWeek: wk, stock, createdAt: Date.now() });
+      const id = 'r' + uidGen(); Store.setDoc('rewards/' + id, { id, name, cost, perWeek: wk, stock, createdAt: Date.now(), by: S.me, byName: (S.heroes[S.me] || {}).name || '' });
+      if (!isCreator()) post('reward', `${(S.heroes[S.me] || {}).name || 'Alguém'} cadastrou a recompensa "${name}" (${cost} XP)`);
       document.getElementById('rw-week').value = ''; document.getElementById('rw-stock').value = '';
       n.value = ''; c.value = ''; clearInput('rw-name'); clearInput('rw-cost'); render(); document.getElementById('rw-name').focus(); showToast(`<span>Recompensa cadastrada: <b>${esc(name)}</b></span>`); return;
     }
     if (form === 'edit') return saveEdit();
+    if ((form === 'board' || form === 'task') && !canMake('tasks')) { showToast(`Nesta sala, ${permNote('tasks')} criam tarefas.`); return; }
     if (form === 'board') {
       const inp = document.getElementById('board-title'); const title = inp.value.trim(); if (!title) { inp.focus(); return; }
       addBoardTask(title, null, document.getElementById('board-due').value, document.getElementById('board-duo').checked, S.boardWho || []); inp.value = ''; clearInput(inp.id); S.newDue = ''; render(); document.getElementById('board-title').focus(); return;

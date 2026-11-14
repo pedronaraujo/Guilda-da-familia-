@@ -25,7 +25,9 @@ const split = (path) => { const m = PATH_RE.exec(String(path)); if (!m) throw ne
 const MAX_SLOTS = 6, MIN_SLOTS = 1;
 const slotsOf = (v) => Math.max(MIN_SLOTS, Math.min(MAX_SLOTS, Math.round(Number(v) || 5)));
 // campos de configuração da sala que só o organizador (criador ou co-criador) pode mudar
-const CFG_FIELDS = ['creatorId', 'coCreators', 'pin', 'xpCap', 'mvpGold', 'allowImport', 'approval', 'diffMul', 'slots', 'name'];
+const CFG_FIELDS = ['creatorId', 'coCreators', 'pin', 'xpCap', 'mvpGold', 'allowImport', 'approval', 'diffMul', 'slots', 'name', 'perms'];
+// quem pode criar missões do quadro e recompensas (o padrão repete o que o app faz sem configuração)
+const PERM_DEF = { tasks: 'all', rewards: 'org' };
 const sized = (data) => { if (JSON.stringify(data ?? null).length > MAX_DOC) throw new Error('documento grande demais (too_large)'); return data; };
 
 /** Uma sala da guilda: guarda meta, revisão e os documentos (heroes/…, party/main, board/…). */
@@ -74,6 +76,15 @@ export class Room extends DurableObject {
       }
       // o dono nunca muda por escrita de outra pessoa; um herói sem dono só passa a ter dono quando o próprio jogador o assume
       data.owner = prev ? (prev.owner || (data.owner === acct ? acct : null)) : acct;
+    } else if (!prev && (rel.startsWith('board/') || rel.startsWith('rewards/'))) {
+      const k = rel.startsWith('board/') ? 'tasks' : 'rewards';
+      const party = (await this.ctx.storage.get('d:party/main')) || {};
+      const c = Object.assign({ mode: PERM_DEF[k], heroes: [] }, (party.perms || {})[k] || {});
+      if (c.mode !== 'all' && !(await this.isOrg(acct))) {
+        let ok = false;
+        if (c.mode === 'some') for (const id of c.heroes || []) { const h = await this.ctx.storage.get('d:heroes/' + id); if (h && h.owner === acct) ok = true; }
+        if (!ok) throw new Error(k === 'tasks' ? 'O organizador não liberou criar tarefas para você.' : 'O organizador não liberou criar recompensas para você.');
+      }
     } else if (rel === 'party/main' && prev && prev.creatorId && !(await this.isOrg(acct))) {
       for (const k of CFG_FIELDS) { if (k in prev) data[k] = prev[k]; else delete data[k]; }
     }

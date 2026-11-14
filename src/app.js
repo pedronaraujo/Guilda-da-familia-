@@ -268,7 +268,8 @@
     async forget(code) { if (!this.on()) return; try { const r = await this.call('room_del', S.acct.token, code); S.acct.rooms = r.rooms || []; render(); } catch (e) { showToast('Não deu para remover agora.'); } },
     heroIn(code) { const r = this.on() && S.acct.rooms.find((x) => x.code === code); return r ? r.hero : null; },
   };
-  function afterRemote() { if (!S.ready || !S.room) return; if (S.me && ((!S.heroes[S.me] && Object.keys(S.heroes).length) || (S.heroes[S.me] && !canControl(S.heroes[S.me])))) { const gone = !S.heroes[S.me]; S.me = null; if (['home', 'hero', 'settings', 'bestiary', 'report'].includes(S.view)) S.view = 'select'; if (gone && Store.server) showToast('Seu personagem foi retirado da sala pelo organizador.'); } tidyAll(); maybeShowReport(); render(); processInbox(); }
+  function afterRemote() { if (!S.ready || !S.room) return; if (S.me && ((!S.heroes[S.me] && Object.keys(S.heroes).length) || (S.heroes[S.me] && !canControl(S.heroes[S.me])))) { const gone = !S.heroes[S.me] && S.meRoom === S.room && S.seenHeroes && S.seenHeroes.has(S.me); S.me = null; S.meRoom = null; if (['home', 'hero', 'settings', 'bestiary', 'report'].includes(S.view)) S.view = 'select'; if (gone && Store.server) showToast('Seu personagem foi retirado da sala pelo organizador.'); }
+    if (S.me && S.heroes[S.me]) { if (!S.seenHeroes || S.seenRoom !== S.room) { S.seenHeroes = new Set(); S.seenRoom = S.room; } S.seenHeroes.add(S.me); } tidyAll(); maybeShowReport(); render(); processInbox(); }
 
   /* ---------------- Regras ---------------- */
   const heroList = () => Object.values(S.heroes).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
@@ -332,7 +333,7 @@
   const fmtBirth = (b) => { if (!b) return ''; const [y, m, d] = b.split('-'); return `${d}/${m}/${y}`; };
   const masterLocked = () => !isCreator() || !!(S.party && S.party.pin && !S.masterOk);
 
-  function chooseHero(id) { S.toast = null; S.me = id; lsSet('guilda-me:' + S.room, S.me); S.masterOk = false; Acct.room(S.me); S.view = 'home'; tidyAll(); render(); scrollTo(0, 0); maybeShowReport(); processInbox(); }
+  function chooseHero(id) { S.toast = null; S.me = id; S.meRoom = S.room; lsSet('guilda-me:' + S.room, S.me); S.masterOk = false; Acct.room(S.me); S.view = 'home'; tidyAll(); render(); scrollTo(0, 0); maybeShowReport(); processInbox(); }
   // cópia de um herói de outra sala: leva nível, habilidades, visual, equipamentos e relíquias; tarefas e ouro recomeçam
   function importedHero(src, fromRoom) {
     const keep = ['name', 'cls', 'look', 'level', 'xp', 'points', 'mastery', 'skills', 'gear', 'cosmetics', 'relics', 'relicOn', 'birth', 'treeV', 'ach', 'stats', 'kudosLog'];
@@ -340,6 +341,11 @@
     for (const k of keep) if (src[k] !== undefined) h[k] = clone(src[k]);
     h.stats = Object.assign({ done: 0, xp: 0 }, h.stats || {}); h.cosmetics = h.cosmetics || { owned: [] };
     return h;
+  }
+  // devolve todos os pontos gastos em habilidades e treinos
+  function refundPoints(h) {
+    const n = Object.values(h.skills || {}).reduce((a, b) => a + b, 0) + (h.mastery || 0);
+    h.skills = {}; h.mastery = 0; h.points = (h.points || 0) + n; return h.points;
   }
   function newHero(draft) {
     return {
@@ -1430,6 +1436,8 @@
         <div class="stat"><div class="v num">${st.maxHp}</div><div class="l">Vida</div></div><div class="stat"><div class="v num">${Math.round(st.atk)}</div><div class="l">Poder</div></div>
         <div class="stat"><div class="v num">${Math.round(st.def)}</div><div class="l">Defesa</div></div><div class="stat"><div class="v num">${st.spd}</div><div class="l">Velocidade</div></div>
         <div class="stat"><div class="v num">${Math.round(st.crit * 100)}%</div><div class="l">Crítico</div></div><div class="stat"><div class="v num">${Math.round(st.dodge * 100)}%</div><div class="l">Esquiva</div></div></div></section>
+      <section class="card"><div class="eyebrow">Classe e pontos</div><p class="small" style="margin:6px 0 10px">Quer testar outro caminho? Refazer as habilidades devolve todos os pontos (inclusive os treinos), de graça e quando quiser. Também dá para trocar de classe sem perder o nível.</p>
+        <div class="row" style="gap:8px"><button class="btn sm" data-act="respecAsk" ${S.readOnly || !(Object.keys(h.skills || {}).length || h.mastery) ? 'disabled' : ''}>Refazer habilidades · grátis</button><button class="btn sm" data-act="clsAsk" ${S.readOnly ? 'disabled' : ''}>Trocar de classe</button></div></section>
       <section class="card"><div class="eyebrow">Treinamento</div><p class="small" style="margin:6px 0 10px">Troque 1 ponto por +2% de vida, poder e defesa. Bom quando nada novo está disponível. ${h.mastery ? `Treinos feitos: <b>${h.mastery}</b>.` : ''}</p>
         <button class="btn sm" data-act="mastery" ${h.points && !S.readOnly ? '' : 'disabled'}>Treinar · 1 ponto</button>${allMax ? ' <span class="small muted">Árvore completa!</span>' : ''}</section></div></div>`;
   }
@@ -1658,6 +1666,23 @@
         <p class="small" style="margin:6px 0 12px">Se você esquecer a senha, é com o seu e-mail e este código que você cria uma senha nova. <b>Ele aparece só agora.</b> Anote num papel, guarde no gerenciador de senhas ou tire uma foto.</p>
         <div class="rc-code num" id="rc-code">${esc(m.code)}</div>
         <div class="row" style="margin-top:14px"><button class="btn" data-act="copyRecovery">Copiar</button><span class="spacer"></span><button class="btn primary" data-act="recoveryDone">Já guardei</button></div></div></div>`;
+    }
+    if (m.type === 'respec') {
+      const h = S.heroes[S.me]; if (!h) return '';
+      const n = Object.values(h.skills || {}).reduce((a, b) => a + b, 0) + (h.mastery || 0);
+      return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="rs-t" data-stop><div class="eyebrow">Habilidades</div><h3 id="rs-t">Refazer as habilidades?</h3>
+        <p class="small" style="margin:6px 0 12px">Todas as habilidades${h.mastery ? ' e treinos' : ''} de <b>${esc(h.name)}</b> são esquecidas e os <b>${n} ponto${n === 1 ? '' : 's'}</b> voltam para você distribuir de novo. É grátis e dá para fazer quando quiser. Só não esqueça de escolher antes da batalha da meia-noite.</p>
+        <div class="row"><button class="btn primary" data-act="respecOk">Refazer</button><button class="btn ghost" data-act="closeModal">Cancelar</button></div></div></div>`;
+    }
+    if (m.type === 'cls') {
+      const h = S.heroes[S.me]; if (!h) return '';
+      const k = D.CLASSES[m.cls]; const pv = Object.assign({}, h, { cls: m.cls });
+      const n = Object.values(h.skills || {}).reduce((a, b) => a + b, 0) + (h.mastery || 0) + (h.points || 0);
+      return `<div class="modal-bg" data-act="closeModal"><div class="modal cls-modal" role="dialog" aria-modal="true" aria-labelledby="cl-t" data-stop><div class="eyebrow">Trocar de classe</div><h3 id="cl-t">Escolha a nova classe de ${esc(h.name)}</h3>
+        <div class="cls-pv"><div class="fig">${A.heroSvg(pv, { noPet: true })}</div><div><b style="color:${k.color}">${esc(k.name)}</b> · <span class="small">${esc(k.role)}</span><p class="small muted" style="margin:4px 0 0">${esc(k.blurb)}</p></div></div>
+        <div class="classes compact">${Object.values(D.CLASSES).map((c) => `<button class="cls" style="--cc:${c.color}" data-act="clsPick" data-v="${c.id}" aria-pressed="${m.cls === c.id}"><span class="cn">${c.name}</span><span class="cr">${c.role}</span></button>`).join('')}</div>
+        <p class="small" style="margin:10px 0 12px">Continua no <b>nível ${h.level}</b>, com equipamentos, roupas, relíquias e ouro. As habilidades da classe atual são esquecidas e ${h.name} fica com <b>${n} ponto${n === 1 ? '' : 's'}</b> para a árvore nova.</p>
+        <div class="row"><button class="btn primary" data-act="clsOk" ${m.cls === h.cls ? 'disabled' : ''}>${m.cls === h.cls ? 'Escolha outra classe' : `Virar ${esc(k.name)}`}</button><button class="btn ghost" data-act="closeModal">Cancelar</button></div></div></div>`;
     }
     if (m.type === 'reopen') {
       const t = m.kind === 'board' ? S.board[m.id] : ((S.heroes[m.hero] || {}).tasks || []).find((x) => x.id === m.id); if (!t) return '';
@@ -2185,7 +2210,7 @@
       Store.saveHero(h);
       const p = clone(S.party || newParty());
       if (!p.creatorId || !S.heroes[p.creatorId]) { p.creatorId = h.id; Store.saveParty(p); }
-      S.me = h.id; lsSet('guilda-me:' + S.room, h.id); S.masterOk = false; Acct.room(h.id);
+      S.me = h.id; S.meRoom = S.room; lsSet('guilda-me:' + S.room, h.id); S.masterOk = false; Acct.room(h.id);
       S.heroId = h.id; S.view = 'hero'; S.tab = 'tarefas'; S.draft = null; render(); scrollTo(0, 0);
       showToast(`<span><b>${esc(h.name)}</b> entrou para a guilda!</span>`);
     },
@@ -2360,11 +2385,21 @@
       h.evBought[ev.key] = b.concat(i); h.spent = (h.spent || 0) + it.price; checkAch(h); Store.saveHero(h); sfx('chest');
       showToast(`<span>Comprou <b>${esc(it.relic.name)}</b> do mercador.</span>`); post('event', `${h.name} comprou "${it.relic.name}" do Mercador Errante`); render();
     },
-    respec() {
-      const ev = eventOn(); const h = hero() || S.heroes[S.me]; if (!ev || !ev.respec || !h) return;
-      const spent = Object.values(h.skills || {}).reduce((a, b) => a + b, 0);
-      h.skills = {}; h.points = (h.points || 0) + spent; S.chanceKey = ''; Store.saveHero(h);
-      S.heroId = h.id; S.view = 'hero'; S.tab = 'habilidades'; render(); showToast(`<span>${spent} pontos devolvidos. Escolha as habilidades de novo.</span>`);
+    respec() { actions.respecAsk(); },
+    respecAsk() { const h = S.heroes[S.me]; if (!h) return; S.modal = { type: 'respec' }; render(); },
+    respecOk() {
+      const h = S.heroes[S.me]; S.modal = null; if (!h) return render();
+      const n = refundPoints(h); S.chanceKey = ''; S.selSkill = null; Store.saveHero(h);
+      S.heroId = h.id; S.view = 'hero'; S.tab = 'habilidades'; render(); showToast(`<span>${n} ponto${n === 1 ? '' : 's'} devolvido${n === 1 ? '' : 's'}. Escolha as habilidades de novo.</span>`);
+    },
+    clsAsk() { const h = S.heroes[S.me]; if (!h) return; S.modal = { type: 'cls', cls: h.cls }; render(); },
+    clsPick(el) { if (S.modal && S.modal.type === 'cls') { S.modal.cls = el.dataset.v; render(); } },
+    clsOk() {
+      const h = S.heroes[S.me]; const m = S.modal; S.modal = null; if (!h || !m || !D.CLASSES[m.cls] || m.cls === h.cls) return render();
+      const from = D.CLASSES[h.cls].name; const n = refundPoints(h); h.cls = m.cls; S.chanceKey = ''; S.selSkill = null; Store.saveHero(h);
+      post('cls', `${h.name} trocou de classe: ${from} → ${D.CLASSES[h.cls].name}`);
+      S.heroId = h.id; S.view = 'hero'; S.tab = 'habilidades'; render(); scrollTo(0, 0);
+      showToast(`<span><b>${esc(h.name)}</b> agora é ${esc(D.CLASSES[h.cls].name)}! ${n} ponto${n === 1 ? '' : 's'} para a árvore nova.</span>`);
     },
     replayEvent() { const eb = S.party && S.party.eventBattle; if (eb) openReplay(battleOf(eb)); },
     report() { if (!isCreator()) return; S.view = 'report'; render(); scrollTo(0, 0); },
@@ -2402,7 +2437,7 @@
     if (a === 'closeModal' && el.classList.contains('modal-bg') && ev.target !== el) return;
     if (el.tagName === 'INPUT') { actions[a] && actions[a](el, ev); return; }
     ev.preventDefault();
-    if (S.readOnly && ['saveHero', 'askRedeem', 'redeem', 'delReward', 'done', 'delTask', 'undoTask', 'undoBoard', 'doneBoard', 'pickBoard', 'doneBoardAs', 'delBoard', 'setPinAsk', 'clearPin', 'delChore', 'toggleCo', 'openChest', 'openBday', 'askKudos', 'sendKudos', 'approve', 'reject', 'setApproval', 'reqOk', 'reqNo', 'reqDone', 'equipRelic', 'sellRelic', 'claimGoal', 'buyMerchant', 'respec', 'learn', 'mastery', 'buyGear', 'buyCos', 'buyPotion', 'equipCos', 'setCos', 'retire', 'look', 'randLook', 'forceBattle'].includes(a) && S.view !== 'create') return;
+    if (S.readOnly && ['saveHero', 'askRedeem', 'redeem', 'delReward', 'done', 'delTask', 'undoTask', 'undoBoard', 'doneBoard', 'pickBoard', 'doneBoardAs', 'delBoard', 'setPinAsk', 'clearPin', 'delChore', 'toggleCo', 'openChest', 'openBday', 'askKudos', 'sendKudos', 'approve', 'reject', 'setApproval', 'reqOk', 'reqNo', 'reqDone', 'equipRelic', 'sellRelic', 'claimGoal', 'buyMerchant', 'respec', 'respecOk', 'clsOk', 'learn', 'mastery', 'buyGear', 'buyCos', 'buyPotion', 'equipCos', 'setCos', 'retire', 'look', 'randLook', 'forceBattle'].includes(a) && S.view !== 'create') return;
     actions[a] && actions[a](el, ev);
   });
   let renameTimer = null, diffTimer = null;
@@ -2535,6 +2570,7 @@
   }
   async function enterRoom(code) {
     code = normCode(code); S.roomErr = '';
+    S.me = null; S.meRoom = null; // o herói da sala anterior não vale aqui (evita o aviso falso de "retirado da sala")
     if (code.length !== 6) { S.roomErr = 'O código tem 6 letras e números.'; render(); return; }
     if (needAcct()) { S.pendingInvite = code; sessSet('guilda-invite', code); S.view = 'rooms'; render(); return; }
     S.busy = true; render();
@@ -2549,7 +2585,7 @@
     if (!(me && S.heroes[me])) { const am = Acct.heroIn(code); if (am && S.heroes[am]) { me = am; lsSet('guilda-me:' + code, am); } }
     if (me && S.heroes[me] && !canControl(S.heroes[me])) me = null; // personagem de outra pessoa: escolha de novo
     if (!(me && S.heroes[me]) && Store.server && S.acct) { const mine = heroList().filter((h) => h.owner === myAcct()); if (mine.length === 1) me = mine[0].id; }
-    S.me = me && S.heroes[me] ? me : null; S.masterOk = false;
+    S.me = me && S.heroes[me] ? me : null; S.masterOk = false; S.meRoom = S.me ? code : null;
     Acct.room();
     S.view = S.me ? 'home' : 'select';
     tidyAll(); render(); scrollTo(0, 0);

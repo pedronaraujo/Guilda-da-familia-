@@ -763,3 +763,10 @@ s.small { opacity: .6; }
 .room-cfg .field { margin-bottom: 10px; }
 .hidden { display: none !important; }
 .perm-note { margin-bottom: 14px; }
+/* trocar de classe */
+.cls-modal { max-width: 720px; }
+.cls-pv { display: flex; gap: 14px; align-items: center; margin: 8px 0 12px; padding: 10px; border-radius: 12px; background: rgba(255,255,255,.04); }
+.cls-pv .fig { width: 76px; height: 92px; flex: none; }
+.cls-pv .fig svg { width: 100%; height: 100%; }
+.classes.compact { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); max-height: 40vh; overflow: auto; }
+.classes.compact .cls { padding: 8px 10px; }

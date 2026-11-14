@@ -136,6 +136,18 @@ with sync_playwright() as p:
     T('Cancelar esta' not in tb, 'Beto recebe o cancelamento')
     T(not tb.get('Estender roupa', {}).get('done') and hb['xp'] < xp0, f'Beto recebe o reinício e perde o XP ({xp0} → {hb["xp"]})')
 
+    # ---------- prévia da animação das habilidades ----------
+    nav.menu(A, 'tab:habilidades', 600)
+    A.click('.node:not(.locked)'); W(A, 300)
+    if not A.query_selector('[data-act=skillPreview]'):
+        for sid in A.evaluate("[...document.querySelectorAll('.node')].map(n=>n.dataset.v)"):
+            A.click(f'.node[data-v={sid}]'); W(A, 200)
+            if A.query_selector('[data-act=skillPreview]'): break
+    A.click('[data-act=skillPreview]'); W(A, 1500)
+    T(A.query_selector('.skill-pv-modal #units .bu.hero') is not None and 'usa' in A.inner_text('#feed'), 'prévia mostra o herói usando a habilidade')
+    W(A, 3000); T(A.query_selector('.skill-pv-modal') is not None, 'prévia continua repetindo')
+    A.click('.modal [data-act=closeModal]'); W(A, 400)
+    T(A.query_selector('.modal') is None, 'fechar encerra a prévia')
     A.screenshot(path='/tmp/f8_today_mob.png', full_page=True)
     B.screenshot(path='/tmp/f8_today_desk.png', full_page=True)
     nav.menu(B, 'home', 700); B.screenshot(path='/tmp/f8_home_desk.png')

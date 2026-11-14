@@ -1684,7 +1684,7 @@
       const reqs = sel.req ? sel.req.map((r) => c.skillMap[r].name).join(' + ') : sel.reqAny ? sel.reqAny.map((r) => c.skillMap[r].name).join(' ou ') : 'nenhum';
       detail = `<div class="detail inline" style="grid-column:1 / -1;grid-row:${sel.tier + 2}"><div class="row"><h3>${sel.name}</h3><span class="tag">${sel.type === 'a' ? `Ativa · recarga ${sel.cd} turnos` : `Passiva · ${rank}/${sel.max}`}</span></div>
         <p style="margin:8px 0">${sel.desc}</p><p class="small muted" style="margin:0 0 10px">Nível mínimo ${sel.minLevel} · Pré-requisito: ${reqs}</p>
-        ${rank >= sel.max ? '<span class="tag win">Aprendida</span>' : `<button class="btn primary" data-act="learn" data-v="${sel.id}" ${cl.ok && !S.readOnly ? '' : 'disabled'}>${rank ? 'Melhorar' : 'Aprender'} · 1 ponto</button> ${cl.ok ? '' : `<span class="small muted">${cl.why}</span>`}`}</div>`;
+        ${sel.type === 'a' ? `<button class="btn sm ghost skill-pv" data-act="skillPreview" data-v="${sel.id}" style="margin:0 8px 10px 0">▶ Ver em ação</button>` : ''}${rank >= sel.max ? '<span class="tag win">Aprendida</span>' : `<button class="btn primary" data-act="learn" data-v="${sel.id}" ${cl.ok && !S.readOnly ? '' : 'disabled'}>${rank ? 'Melhorar' : 'Aprender'} · 1 ponto</button> ${cl.ok ? '' : `<span class="small muted">${cl.why}</span>`}`}</div>`;
     }
     const allMax = c.skills.every((s) => (h.skills[s.id] || 0) >= s.max);
     return `<div class="grid2"><div class="card"><div class="card-h"><h3>Árvore ${['Bruxa', 'Princesa'].includes(c.name) ? 'da' : 'do'} ${c.name}</h3><span class="chip">${h.points || 0} ponto${h.points === 1 ? '' : 's'}</span></div>
@@ -2088,8 +2088,8 @@
     }
     if (m.type === 'replay') {
       const b = m.battle; const reg = Math.floor((b.stage - 1) / 5) % D.REGIONS.length;
-      return `<div class="modal-bg"><div class="modal wide battle-modal" role="dialog" aria-modal="true" aria-labelledby="rp-t"><div class="card-h"><div><div class="eyebrow">${b.preview ? 'Prévia da batalha desta noite · não vale recompensa' : m.practice ? 'Treino · não vale recompensa' : b.event ? `Evento: ${esc(b.name)} · ${fmtDay(b.day)}` : `Batalha de ${fmtDay(b.day)}${b.test ? ' · teste' : ''}`} · Estágio ${b.stage}</div><h3 id="rp-t">${b.event ? esc(b.special.title) : esc(E.regionOf(b.stage).name)}</h3></div>
-        <div class="row"><button class="btn sm ghost" data-act="toggleSound" id="snd-btn">${Sound.on ? 'Som ligado' : 'Som desligado'}</button><button class="btn sm" data-act="speed">Velocidade ${m.speed}×</button><button class="btn sm" data-act="skip">Pular</button><button class="btn sm ghost" data-act="closeModal">Fechar</button></div></div>
+      return `<div class="modal-bg"><div class="modal wide battle-modal${m.skillPv ? ' skill-pv-modal' : ''}" role="dialog" aria-modal="true" aria-labelledby="rp-t"><div class="card-h"><div><div class="eyebrow">${m.skillPv ? `Prévia da habilidade · ${esc(D.CLASSES[(S.heroes[S.me] || {}).cls] ? D.CLASSES[S.heroes[S.me].cls].name : '')}` : b.preview ? 'Prévia da batalha desta noite · não vale recompensa' : m.practice ? 'Treino · não vale recompensa' : b.event ? `Evento: ${esc(b.name)} · ${fmtDay(b.day)}` : `Batalha de ${fmtDay(b.day)}${b.test ? ' · teste' : ''}`}${m.skillPv ? '' : ` · Estágio ${b.stage}`}</div><h3 id="rp-t">${m.skillPv ? esc(b.skill.name) : b.event ? esc(b.special.title) : esc(E.regionOf(b.stage).name)}</h3>${m.skillPv ? `<p class="small muted" style="margin:2px 0 0">${esc(b.skill.desc)}</p>` : ''}</div>
+        <div class="row"><button class="btn sm ghost" data-act="toggleSound" id="snd-btn">${Sound.on ? 'Som ligado' : 'Som desligado'}</button><button class="btn sm" data-act="speed">Velocidade ${m.speed}×</button>${m.skillPv ? '' : '<button class="btn sm" data-act="skip">Pular</button>'}<button class="btn sm ghost" data-act="closeModal">Fechar</button></div></div>
         ${b.missed ? `<p class="small muted" style="margin:0 0 8px">A guilda ficou ${b.missed} dia${b.missed > 1 ? 's' : ''} sem abrir; esta foi a batalha mais recente.</p>` : ''}
         <div class="scene" id="scene">${A.sceneSvg(reg)}<div class="round-chip" id="round">Rodada 1</div><div class="units" id="units"></div><div class="fxl" id="fxl"></div><div class="res-ov" id="result"></div></div>
         <div class="feed" id="feed" aria-live="polite">Os heróis se preparam…</div></div></div>`;
@@ -2137,6 +2137,9 @@
     clearTimeout(replayTimer);
     const m = RP(); if (!m || m.type !== 'replay' || m.finished) return;
     const ev = m.battle.log[m.step];
+    if (!ev && m.loop) { // prévia de habilidade: volta a vida de todos e repete
+      replayTimer = setTimeout(() => { if (RP() !== m) return; for (const u of m.battle.units) updateUnit(u.id, m.battle.start[u.id]); m.step = 0; scheduleStep(); }, 1500 / m.speed); return;
+    }
     if (!ev) { replayTimer = setTimeout(() => { if (RP() === m) { m.finished = true; showResult(); } }, 500 / m.speed); return; }
     const wait = (ev.tick ? 320 : ev.stunned ? 450 : 900) / m.speed;
     replayTimer = setTimeout(() => { if (RP() !== m) return; playEvent(ev); m.step++; scheduleStep(); }, m.step === 0 ? 500 : wait);
@@ -2385,6 +2388,43 @@
     const ko = b.units.filter((u) => m.hp[u.id] <= 0).length; void ko;
   }
 
+  /* ----- Prévia de habilidade: o herói usa a habilidade num treino, em loop ----- */
+  function skillPreviewBattle(h, sid) {
+    const c = D.CLASSES[h.cls]; const sk = c.skillMap[sid]; if (!sk || sk.type !== 'a') return null;
+    const me = Object.assign(clone(h), { id: 'pv-me', skills: { [sid]: sk.max }, level: Math.max(h.level || 1, sk.minLevel || 1) });
+    const others = heroList().filter((x) => x.id !== h.id).slice(0, 2);
+    const allies = others.length ? others.map((x, i) => Object.assign(clone(x), { id: 'pv-a' + i })) : [];
+    while (allies.length < 2) { const cls = Object.keys(D.CLASSES).filter((k) => k !== h.cls)[Math.floor(Math.random() * 14)]; allies.push({ id: 'pv-a' + allies.length, name: COVER_NAMES[Math.floor(Math.random() * COVER_NAMES.length)], cls, look: randomLook('humano'), level: me.level, skills: {}, gear: {}, cosmetics: {} }); }
+    const hu = [me].concat(allies).map((x) => { const st = E.heroStats(x); return { id: x.id, side: 'h', name: x.name, cls: x.cls, look: x.look, cosmetics: x.cosmetics || {}, maxHp: st.maxHp, atk: st.atk, _h: x }; });
+    const foes = E.buildEnemies(Math.max(1, stage()), 3, 1).map((f, i) => Object.assign({}, f, { id: 'pv-e' + i, side: 'e' }));
+    const atk = hu[0].atk || 20; const dmg = (mult, f) => -Math.max(1, Math.round(atk * (mult || 1) * (0.9 + Math.random() * 0.2) * (f || 1)));
+    const F = foes.map((x) => x.id), A2 = hu.slice(1).map((x) => x.id);
+    let fx; const support = ['heal', 'miracle', 'revive', 'shield', 'buff', 'taunt'].includes(sk.act);
+    if (sk.act === 'aoe' || sk.act === 'nature') fx = F.map((id) => [id, dmg(sk.p), 0, sk.stun ? 'atordoado' : sk.chill ? 'congelado' : null]);
+    else if (sk.act === 'multi') fx = Array.from({ length: Math.max(2, sk.hits || 3) }, (_, i) => [F[i % F.length], dmg(sk.p), 0, i === 1 ? 'crit' : null]);
+    else if (sk.act === 'debuff') fx = F.map((id) => [id, dmg((sk.p || 0.5) * 0.6), 0, 'enfraquecido']);
+    else if (sk.act === 'heal' || sk.act === 'miracle') fx = [hu[0].id].concat(A2).map((id) => [id, Math.round(atk * (sk.p || 1)), 0, 'cura']);
+    else if (sk.act === 'revive') fx = [[A2[0], Math.round(atk * 2), 0, 'renasce']];
+    else if (sk.act === 'shield') fx = [hu[0].id].concat(A2).map((id) => [id, 0, 0, 'escudo']);
+    else if (sk.act === 'buff') fx = [hu[0].id].concat(A2).map((id) => [id, 0, 0, 'fortalecido']);
+    else if (sk.act === 'taunt') fx = [[hu[0].id, 0, 0, 'provocando']];
+    else fx = [[F[0], dmg(sk.p, sk.act === 'execute' ? 1.6 : 1), 0, sk.act === 'execute' ? 'crit' : sk.stun ? 'atordoado' : sk.chill ? 'congelado' : null]];
+    const units = hu.concat(foes).map((u) => { const o = Object.assign({}, u); delete o._h; delete o.atk; return o; });
+    // vida no começo de cada repetição: aliados feridos para a cura aparecer; alvos cheios
+    const start = {}; units.forEach((u) => { start[u.id] = u.maxHp; });
+    if (support && ['heal', 'miracle'].includes(sk.act)) [hu[0].id].concat(A2).forEach((id) => { start[id] = Math.round(units.find((u) => u.id === id).maxHp * 0.45); });
+    if (sk.act === 'revive') start[A2[0]] = 0;
+    const hpAfter = (id, amt) => { const u = units.find((x) => x.id === id); return Math.max(amt < 0 ? 1 : 0, Math.min(u.maxHp, start[id] + amt)); };
+    fx = fx.map(([id, amt, , flag]) => [id, amt, hpAfter(id, amt), flag]);
+    const ev = { r: 1, a: hu[0].id, s: sk.name, fx };
+    return { stage: Math.max(1, stage()), win: true, rounds: 1, log: [ev], units, start, skill: sk, heroes: Object.fromEntries(hu.map((x) => [x.id, x._h])) };
+  }
+  function openSkillPreview(sid) {
+    const h = S.heroes[S.me]; if (!h) return; const b = skillPreviewBattle(h, sid); if (!b) return;
+    clearTimeout(replayTimer);
+    S.modal = { type: 'replay', battle: b, practice: true, skillPv: true, loop: true, heroes: b.heroes, step: 0, speed: 1, hp: Object.assign({}, b.start), finished: false, mounted: true, key: uidGen() };
+    render();
+  }
   /* ----- Capa: uma batalha aleatória em loop na tela de entrada ----- */
   const COVER_NAMES = ['Lia', 'Tavo', 'Rubi', 'Kael', 'Nina', 'Bento', 'Iara', 'Theo', 'Maya', 'Caio', 'Zuri', 'Otto', 'Luna', 'Davi', 'Bia', 'Rafa', 'Duda', 'Nico'];
   function autoSkills(cls, L) {
@@ -2707,6 +2747,7 @@
       showToast(`<span>Tarefa de <b>${esc(o.name)}</b> cancelada${t && t.done === today() ? ' e o XP dela sai do herói' : ''}.</span>`); render();
     },
     delTask(el) { if (!canMake('tasks')) return; const h = hero(); h.tasks = h.tasks.filter((x) => x.id !== el.dataset.id); saveCur(h); },
+    skillPreview(el) { openSkillPreview(el.dataset.v); },
     selSkill(el) { S.selSkill = el.dataset.v; render(); },
     learn(el) {
       const h = hero(); const s = D.CLASSES[h.cls].skillMap[el.dataset.v]; if (!E.canLearn(h, s).ok) return;
@@ -2747,7 +2788,7 @@
         Store.saveParty(p);
       }
       Store.deleteHero(id); S.view = 'home'; S.heroId = null; render(); },
-    closeModal(el, ev) { if (ev && ev.target.closest('[data-stop]') && el.classList.contains('modal-bg')) return; const was = S.modal && S.modal.type; clearTimeout(replayTimer); Sound.music(false); S.modal = null; render(); if (was === 'replay') setTimeout(maybeShowReport, 300); },
+    closeModal(el, ev) { if (ev && ev.target.closest('[data-stop]') && el.classList.contains('modal-bg')) return; const was = S.modal && S.modal.type && !S.modal.skillPv ? S.modal.type : null; clearTimeout(replayTimer); Sound.music(false); S.modal = null; render(); if (was === 'replay') setTimeout(maybeShowReport, 300); },
     goSkills() { S.modal = null; S.view = 'hero'; S.tab = 'habilidades'; render(); },
     practice() { const hs = heroList(); const st = stage(); const res = E.simulate(hs, st, Math.floor(Math.random() * 1e9), true, level().mul); openReplay({ day: today(), stage: st, win: res.win, gold: 0, rounds: res.rounds, log: res.log, units: res.units }, true); },
     // prévia: mostra como seria a batalha desta noite se fosse agora; não muda nada no jogo

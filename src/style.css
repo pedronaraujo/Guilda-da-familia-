@@ -962,3 +962,4 @@ html[data-cls] .stage { background: linear-gradient(var(--panel-2), var(--bg-2) 
 .res.mini p { font-size: clamp(12px, 1.8cqw, 16px); }
 @media (max-width: 640px) { .cover-scene { aspect-ratio: 4 / 3; border-radius: 16px; } }
 .topbar.tb-out { border-bottom: 0; background: transparent; min-height: 0; padding-top: 8px; }
+.skill-pv-modal .round-chip { display: none; }

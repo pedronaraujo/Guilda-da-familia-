@@ -1,6 +1,8 @@
 # Quem pode criar tarefas e recompensas + régua de dificuldade gradual.
 # Rode antes: npx wrangler dev --port 8787
 from playwright.sync_api import sync_playwright
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import nav
 import sys, datetime
 URL = sys.argv[1] if len(sys.argv) > 1 else 'http://127.0.0.1:8787/'
 errs = []; fails = []
@@ -22,7 +24,7 @@ def register(P, email):
     if P.query_selector('[data-act=recoveryDone]'): P.click('[data-act=recoveryDone]'); W(P, 400)
 def new_hero(P, name, cls):
     P.click('[data-act=create]'); W(P, 500); P.fill('#hero-name', name); P.click(f'[data-act=cls][data-v={cls}]'); P.click('[data-act=saveHero]'); W(P, 1400); close_modal(P)
-def menu(P, v): P.click('.nav-btn'); W(P, 200); P.click(f'.nav-it[data-v="{v}"]'); W(P, 700)
+def menu(P, v): nav.menu(P, v)
 with sync_playwright() as p:
     b = p.chromium.launch(executable_path='/usr/bin/google-chrome')
     def ctx():
@@ -32,7 +34,7 @@ with sync_playwright() as p:
     A.fill('#room-name', 'Casa'); A.press('#room-name', 'Enter'); W(A, 2500)
     code = A.evaluate("JSON.parse(localStorage.getItem('guilda-last-room'))")
     new_hero(A, 'Ana', 'paladino')
-    menu(A, 'home'); A.click('.sessbar [data-act=invite]'); W(A, 400); link = A.input_value('#invite-url'); close_modal(A)
+    menu(A, 'home'); nav.invite(A); link = A.input_value('#invite-url'); close_modal(A)
     B = ctx().new_page(); B.on('pageerror', lambda e: errs.append('B: ' + str(e)))
     B.goto(link); W(B, 1500); register(B, f'kid{stamp}@exemplo.com'); W(B, 1500)
     new_hero(B, 'Beto', 'guerreiro')

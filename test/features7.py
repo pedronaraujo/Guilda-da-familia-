@@ -1,5 +1,7 @@
 # Cópias de segurança dos dados da sala: automáticas, manual, baixar e restaurar.
 from playwright.sync_api import sync_playwright
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import nav
 import sys, datetime
 URL = sys.argv[1] if len(sys.argv) > 1 else 'http://127.0.0.1:8787/'
 errs = []; fails = []
@@ -18,7 +20,7 @@ def close_modal(P):
 def register(P, email):
     P.fill('#acct-email', email); P.fill('#acct-pass', 'senha123'); P.click('[data-act=register]'); W(P, 1800)
     if P.query_selector('[data-act=recoveryDone]'): P.click('[data-act=recoveryDone]'); W(P, 400)
-def menu(P, v): P.click('.nav-btn'); W(P, 200); P.click(f'.nav-it[data-v="{v}"]'); W(P, 900)
+def menu(P, v): nav.menu(P, v, 900)
 with sync_playwright() as p:
     b = p.chromium.launch(executable_path='/usr/bin/google-chrome')
     def ctx():

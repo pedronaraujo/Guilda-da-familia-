@@ -2,6 +2,8 @@
 # elogios (2/dia, alinhamento, resumo), aniversário travado, menu, reabrir tarefas, roupas temáticas.
 # Rode antes: npx wrangler dev --port 8787
 from playwright.sync_api import sync_playwright
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import nav
 import sys, datetime
 URL = sys.argv[1] if len(sys.argv) > 1 else 'http://127.0.0.1:8787/'
 errs = []; fails = []
@@ -30,9 +32,9 @@ def new_hero(P, name, cls, outfit=None):
     if outfit: P.click(f'[data-act=look][data-k=outfit][data-v={outfit}]')
     P.click('[data-act=saveHero]'); W(P, 1400); close_modal(P)
 def go_home(P):
-    P.click('.nav-btn'); W(P, 200); P.click('.nav-it[data-v=home]'); W(P, 600)
+    nav.menu(P, 'home')
 def settings(P):
-    P.click('.nav-btn'); W(P, 200); P.click('.nav-it[data-v=settings]'); W(P, 700)
+    nav.menu(P, 'settings')
 with sync_playwright() as p:
     b = p.chromium.launch(executable_path='/usr/bin/google-chrome')
     def ctx():
@@ -46,7 +48,7 @@ with sync_playwright() as p:
     T(bool(rcA) and len(rcA.replace('-', '')) == 16, f'ao criar a conta aparece o código de recuperação: {rcA}')
     T(A.query_selector('#room-name') is not None, 'depois de entrar, aparece criar/entrar em sala')
     A.fill('#room-name', 'Casa'); A.select_option('#room-slots', '3'); A.press('#room-name', 'Enter'); W(A, 2500)
-    code = A.evaluate("(document.body.innerText.match(/Sala\\s+([A-Z0-9]{6})/)||[])[1]")
+    code = A.evaluate("JSON.parse(localStorage.getItem('guilda-last-room'))")
     meta = api(A, 'api_room', code)['meta']
     T(meta.get('slots') == 3, f'sala criada com 3 vagas: {meta.get("slots")}')
     new_hero(A, 'Ana', 'princesa', 'natal')
@@ -56,11 +58,11 @@ with sync_playwright() as p:
     # ---------- menu suspenso ----------
     A.click('.nav-btn'); W(A, 300)
     items = A.inner_text('.nav-pop') if A.query_selector('.nav-pop') else ''
-    T(all(x in items for x in ('Salão', 'Tarefas', 'Habilidades', 'Loja', 'Visual', 'Configurações', 'Tutorial', 'Sair da conta')), 'menu mostra todas as partes do app')
-    A.click('.nav-it[data-v="tab:loja"]'); W(A, 600)
-    T(A.query_selector('.shop-cats') is not None, 'menu leva direto para a loja do herói')
+    T(all(x in items for x in ('Trocar de herói', 'Trocar de sala', 'Tutorial', 'Som', 'Sair da conta')), 'menu da conta tem trocar herói/sala, tutorial, som e sair')
+    A.keyboard.press('Escape'); W(A, 200); nav.menu(A, 'tab:loja')
+    T(A.query_selector('.shop-cats') is not None, 'aba Herói > Equipar > Loja abre a loja')
     go_home(A)
-    T(A.query_selector('.hero-cta [data-act=open]') is not None, 'salão tem o botão "Abrir meu herói"')
+    T(all(A.query_selector(f'.tabbar [data-v={v}]') for v in ('today', 'home', 'hero', 'prizes', 'settings')), 'barra de abas com Hoje, Guilda, Herói, Prêmios e Sala')
     # ---------- configurações: nome, vagas, importados ----------
     settings(A)
     A.fill('#room-rename', 'Casa Nova'); A.select_option('#room-slots-cfg', '4'); A.click('form[data-form=roomcfg] button[type=submit]'); W(A, 1200)
@@ -71,17 +73,17 @@ with sync_playwright() as p:
     T(docs(A, code)['party/main'].get('allowImport') is True, 'organizador permite personagens importados')
     go_home(A)
     # organizador cria um herói para criança sem conta
-    A.click('.nav-btn'); W(A, 200); A.click('.nav-it[data-v=switchHero]'); W(A, 600)
+    nav.menu(A, 'switchHero', 600)
     new_hero(A, 'Kid', 'bardo', 'pijama')
     T('Jogando como Kid' in body(A), 'organizador pode criar um segundo herói (para quem não tem conta)')
-    A.click('.nav-btn'); W(A, 200); A.click('.nav-it[data-v=switchHero]'); W(A, 600)
+    nav.menu(A, 'switchHero', 600)
     A.click(f'xpath=//button[contains(@class,"pickme")][.//div[@class="nm" and text()="Ana"]]'); W(A, 800)
     # missão no quadro para qualquer um
-    A.click('.hero-cta [data-act=open]'); W(A, 600)
-    A.fill('#task-title', 'Lavar a louça'); A.click('[data-act=target][data-v=guild]'); A.click('[data-act=diff][data-v=m]'); A.click('[data-act=freq][data-v=once]'); A.click('form[data-form=task] button[type=submit]'); W(A, 900)
+    nav.menu(A, 'today', 600)
+    A.fill('#task-title', 'Lavar a louça'); nav.more(A); A.click('[data-act=target][data-v=guild]'); A.click('[data-act=diff][data-v=m]'); A.click('[data-act=freq][data-v=once]'); A.click('form[data-form=task] button[type=submit]'); W(A, 900)
     go_home(A)
     # ---------- convite com conta obrigatória ----------
-    A.click('.sessbar [data-act=invite]'); W(A, 400); link = A.input_value('#invite-url'); close_modal(A)
+    nav.invite(A); link = A.input_value('#invite-url'); close_modal(A)
     B = ctx().new_page(); B.on('pageerror', lambda e: errs.append('B: ' + str(e)))
     B.goto(link); W(B, 2000)
     T('convite' in body(B) and B.query_selector('#acct-email') is not None, 'convite sem conta pede login e lembra do convite')
@@ -93,7 +95,7 @@ with sync_playwright() as p:
     T('Quem está jogando' in body(B), 'convidado não consegue jogar com a Ana')
     new_hero(B, 'Beto', 'guerreiro', 'cyberpunk')
     T('Jogando como Beto' in body(B), 'convidado cria o próprio herói')
-    B.click('.nav-btn'); W(B, 200); B.click('.nav-it[data-v=switchHero]'); W(B, 600)
+    nav.menu(B, 'switchHero', 600)
     T(B.query_selector('[data-act=create]') is None, 'convidado não cria um segundo herói')
     B.click(f'xpath=//button[contains(@class,"pickme")][.//div[@class="nm" and text()="Beto"]]'); W(B, 800)
     ana = hero(B, code, 'Ana'); ana['name'] = 'Hackeada'
@@ -104,7 +106,7 @@ with sync_playwright() as p:
     r = api(B, 'api_meta', code, {'name': 'Invadida'})
     T('organizador' in str(r.get('error', '')), 'só o organizador renomeia a sala')
     # ---------- elogios: 2 por dia, alinhamento ----------
-    B.goto(URL); W(B, 2500); close_modal(B)
+    B.goto(URL); W(B, 2500); close_modal(B); nav.menu(B, 'home')
     for name in ('Ana', 'Kid'):
         B.click(f'xpath=//div[contains(@class,"slot")][.//div[@class="nm" and text()="{name}"]]//button[@data-act="askKudos"]'); W(B, 400)
         B.click('.modal [data-act=kudosEmo] >> nth=1'); W(B, 200)
@@ -115,11 +117,11 @@ with sync_playwright() as p:
     T(len(set(tops)) == 1, f'personagens alinhados no salão, com ou sem elogio: {tops}')
     T(len(B.query_selector_all('.lineup .slot')) == 4, 'salão mostra as 4 vagas da sala')
     A.reload(); W(A, 3000); close_modal(A)
-    A.click('.hero-cta [data-act=open]'); W(A, 800)
+    nav.menu(A, 'tab:conquistas', 800)
     ks = A.inner_text('.kudos-sum') if A.query_selector('.kudos-sum') else ''
     T('1 no total' in ks, f'página do herói tem o resumo de elogios: {ks[:80]}')
     # ---------- aniversário travado ----------
-    A.click('[data-act=tab][data-v=visual]'); W(A, 500)
+    nav.menu(A, 'tab:visual', 500)
     T('não pode ser alterado' in body(A), 'aviso de que o aniversário não pode ser alterado')
     A.fill('#birth-edit', '2015-03-09'); A.dispatch_event('#birth-edit', 'change'); W(A, 500)
     T(A.query_selector('[data-act=bdaySave]') is not None, 'pede confirmação antes de salvar o aniversário')
@@ -127,6 +129,7 @@ with sync_playwright() as p:
     T(A.query_selector('#birth-edit') is None and '09/03/2015' in body(A), 'depois de salvo, o aniversário fica fixo')
     T(hero(A, code, 'Ana').get('birth') == '2015-03-09', 'aniversário gravado')
     # ---------- reabrir tarefa cumprida por outra pessoa ----------
+    nav.menu(B, 'today', 600)
     B.click(f'xpath=//li[contains(@class,"task")][.//div[@class="t" and text()="Lavar a louça"]]//button[contains(@class,"done-btn")]'); W(B, 1200)
     if B.query_selector('.modal [data-act=doneBoardAs]'): B.click('.modal [data-act=doneBoardAs]'); W(B, 1200)
     xb = hero(B, code, 'Beto')['stats']['xp']
@@ -148,7 +151,7 @@ with sync_playwright() as p:
     B.wait_for_timeout(6500)
     T('Quem está jogando' in body(B), 'quem foi expulso volta para a escolha de personagem')
     # ---------- importar personagem ----------
-    B.click('.nav-btn'); W(B, 200); B.click('.nav-it[data-v=leaveRoom]'); W(B, 800)
+    nav.menu(B, 'leaveRoom', 800)
     B.fill('#room-name', 'Sala do Beto'); B.press('#room-name', 'Enter'); W(B, 2500)
     new_hero(B, 'Bia', 'gelo', 'astronauta')
     bia = hero(B, B.evaluate("JSON.parse(localStorage.getItem('guilda-last-room'))"), 'Bia')
@@ -173,16 +176,16 @@ with sync_playwright() as p:
     r = C.evaluate("([e,c])=>fetch('/api/auth_reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify([e,c,'outra123'])}).then(r=>r.json())", [EB, rcB])
     T('incorretos' in str(r.get('error', '')), 'o código usado não serve de novo')
     # ---------- roupas temáticas no editor ----------
-    A.click('.nav-btn'); W(A, 200); A.click('.nav-it[data-v="tab:visual"]'); W(A, 600)
+    nav.menu(A, 'tab:visual', 600)
     th = A.evaluate("[...document.querySelectorAll('[data-k=outfit]')].map(b=>b.dataset.v)")
     T(all(x in th for x in ('natal', 'cyberpunk', 'praia', 'pesada', 'kimono', 'pirata', 'astronauta', 'ninja', 'caipira', 'pijama', 'heroi', 'gala', 'explorador', 'viking')), f'{len(th)} roupas no editor, com as temáticas')
     go_home(A); A.screenshot(path='/tmp/f4_home.png', full_page=True)
     A.click('.nav-btn'); W(A, 300); A.screenshot(path='/tmp/f4_menu.png')
-    A.click('.nav-btn'); W(A, 200); settings(A); A.screenshot(path='/tmp/f4_settings.png', full_page=True)
+    A.keyboard.press('Escape'); W(A, 200); settings(A); A.screenshot(path='/tmp/f4_settings.png', full_page=True)
     D = ctx().new_page(); D.goto(URL); W(D, 1500); D.screenshot(path='/tmp/f4_login.png')
     B.goto(URL); W(B, 2000)
     T(B.query_selector('#acct-email') is not None, 'depois da troca de senha, os outros aparelhos pedem login de novo')
-    A.click('.nav-btn'); W(A, 200); A.click('.nav-it[data-v=switchHero]'); W(A, 600); A.screenshot(path='/tmp/f4_select.png')
+    nav.menu(A, 'switchHero', 600); A.screenshot(path='/tmp/f4_select.png')
     b.close()
 print('erros de script:', errs)
 print(f'{len(fails)} FALHAS' if fails else 'TUDO OK')

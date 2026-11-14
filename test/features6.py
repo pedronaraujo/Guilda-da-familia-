@@ -1,6 +1,8 @@
 # Aviso falso de "retirado da sala" ao trocar de sala/personagem; refazer habilidades; trocar de classe.
 # Rode antes: npx wrangler dev --port 8787
 from playwright.sync_api import sync_playwright
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import nav
 import sys, datetime
 URL = sys.argv[1] if len(sys.argv) > 1 else 'http://127.0.0.1:8787/'
 errs = []; fails = []
@@ -21,7 +23,7 @@ def close_modal(P):
         if P.query_selector('.modal-bg') and not P.query_selector('.modal.recovery'): P.keyboard.press('Escape'); W(P, 300)
 def new_hero(P, name, cls):
     P.click('[data-act=create]'); W(P, 500); P.fill('#hero-name', name); P.click(f'[data-act=cls][data-v={cls}]'); P.click('[data-act=saveHero]'); W(P, 1400); close_modal(P)
-def menu(P, v): P.click('.nav-btn'); W(P, 200); P.click(f'.nav-it[data-v="{v}"]'); W(P, 700)
+def menu(P, v): nav.menu(P, v)
 def new_room(P, name):
     P.fill('#room-name', name); P.press('#room-name', 'Enter'); W(P, 2500)
     return P.evaluate("JSON.parse(localStorage.getItem('guilda-last-room'))")

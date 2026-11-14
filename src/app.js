@@ -269,7 +269,7 @@
     async forget(code) { if (!this.on()) return; try { const r = await this.call('room_del', S.acct.token, code); S.acct.rooms = r.rooms || []; render(); } catch (e) { showToast('Não deu para remover agora.'); } },
     heroIn(code) { const r = this.on() && S.acct.rooms.find((x) => x.code === code); return r ? r.hero : null; },
   };
-  function afterRemote() { if (!S.ready || !S.room) return; if (S.me && ((!S.heroes[S.me] && Object.keys(S.heroes).length) || (S.heroes[S.me] && !canControl(S.heroes[S.me])))) { const gone = !S.heroes[S.me] && S.meRoom === S.room && S.seenHeroes && S.seenHeroes.has(S.me); S.me = null; S.meRoom = null; if (['home', 'hero', 'settings', 'bestiary', 'report'].includes(S.view)) S.view = 'select'; if (gone && Store.server) showToast('Seu personagem foi retirado da sala pelo organizador.'); }
+  function afterRemote() { if (!S.ready || !S.room) return; if (S.me && ((!S.heroes[S.me] && Object.keys(S.heroes).length) || (S.heroes[S.me] && !canControl(S.heroes[S.me])))) { const gone = !S.heroes[S.me] && S.meRoom === S.room && S.seenHeroes && S.seenHeroes.has(S.me); S.me = null; S.meRoom = null; if (['home', 'hero', 'settings', 'bestiary', 'report'].includes(S.view)) S.view = 'select'; if (gone && Store.server) showToast('Seu herói foi retirado da sala pelo organizador.'); }
     if (S.me && S.heroes[S.me]) { if (!S.seenHeroes || S.seenRoom !== S.room) { S.seenHeroes = new Set(); S.seenRoom = S.room; } S.seenHeroes.add(S.me); } tidyAll(); maybeShowReport(); render(); processInbox(); }
 
   /* ---------------- Regras ---------------- */
@@ -311,7 +311,7 @@
   const roomSlots = () => Math.max(1, Math.min(MAX_SLOTS, Math.round(Number(S.roomMeta && S.roomMeta.slots) || D.MAX_HEROES)));
   const canCreateHero = () => heroList().length < roomSlots() && (!Store.server || orgAcct() || !heroList().some((h) => h.owner === myAcct()));
   const isCreator = (id) => isMainCreator(id) || isCoCreator(id) || (id === undefined && !!Store.server && !!S.me && orgAcct());
-  const roleTag = (h) => { if (!h) return ''; const f = h.look && h.look.gender === 'f'; return isMainCreator(h.id) ? `<span class="tag crown">${f ? 'Criadora' : 'Criador'} da sala</span>` : isCoCreator(h.id) ? `<span class="tag crown co">${f ? 'Co-criadora' : 'Co-criador'}</span>` : ''; };
+  const roleTag = (h) => { if (!h) return ''; const f = h.look && h.look.gender === 'f'; return isMainCreator(h.id) ? `<span class="tag crown">${f ? 'Organizadora' : 'Organizador'} da sala</span>` : isCoCreator(h.id) ? `<span class="tag crown co">${f ? 'Co-organizadora' : 'Co-organizador'}</span>` : ''; };
   const choreList = () => Object.values(S.chores || {}).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   const goldOf = (h) => Math.max(0, ((S.party && S.party.earned && S.party.earned[h.id]) || 0) + (h.bonusGold || 0) - (h.spent || 0));
   const xpFor = (t, h) => xpCalc(t, h || (S.me && S.heroes[S.me]));
@@ -334,7 +334,7 @@
   const fmtBirth = (b) => { if (!b) return ''; const [y, m, d] = b.split('-'); return `${d}/${m}/${y}`; };
   const masterLocked = () => !isCreator() || !!(S.party && S.party.pin && !S.masterOk);
 
-  function chooseHero(id) { S.toast = null; S.me = id; S.meRoom = S.room; lsSet('guilda-me:' + S.room, S.me); S.masterOk = false; Acct.room(S.me); S.view = 'home'; tidyAll(); render(); scrollTo(0, 0); maybeShowReport(); processInbox(); }
+  function chooseHero(id) { S.toast = null; S.me = id; S.meRoom = S.room; lsSet('guilda-me:' + S.room, S.me); S.masterOk = false; Acct.room(S.me); S.view = 'today'; tidyAll(); render(); scrollTo(0, 0); maybeShowReport(); processInbox(); }
   // cópia de um herói de outra sala: leva nível, habilidades, visual, equipamentos e relíquias; tarefas e ouro recomeçam
   function importedHero(src, fromRoom) {
     const keep = ['name', 'cls', 'look', 'level', 'xp', 'points', 'mastery', 'skills', 'gear', 'cosmetics', 'relics', 'relicOn', 'birth', 'treeV', 'ach', 'stats', 'kudosLog'];
@@ -373,7 +373,7 @@
       if (task.chore) { const c = S.chores[task.chore]; if ((!c || !choreFor(c, h)) && !task.done) { changed = true; continue; } if (c && !task.done && ['title', 'diff', 'days', 'every', 'start', 'dom', 'due'].some((k) => String(task[k] || null) !== String(c[k] || null))) { Object.assign(task, { title: c.title, diff: c.diff, days: c.days || null, every: c.every || null, start: c.start || null, dom: c.dom || null, due: c.due || null }); changed = true; } }
       const r = tidyTask(task, t); if (r) changed = true; if (r !== 'drop') keep.push(task);
     }
-    // tarefas obrigatórias definidas pelo criador da sala
+    // tarefas obrigatórias definidas pelo organizador da sala
     for (const c of choreList()) {
       if (!choreFor(c, h) || keep.some((x) => x.chore === c.id) || !scheduledOn(c, t) || (c.from && t < c.from)) continue;
       keep.push({ id: 'c' + c.id, chore: c.id, title: c.title, diff: c.diff, repeat: true, days: c.days || null, every: c.every || null, start: c.start || null, dom: c.dom || null, due: c.due || null, created: t, done: null, gain: 0 }); changed = true;
@@ -671,53 +671,97 @@
     if (it.kind === 'loot' && it.relic) { const ok = addRelic(h, it.relic); return { note: ok ? `Saque da batalha: <b style="color:${D.RARITY[it.relic.rarity].color}">${esc(it.relic.name)}</b>` : `Mochila cheia: <b>${esc(it.relic.name)}</b> virou ouro` }; }
     if (it.kind === 'refund') { h.redeemed = Math.max(0, (h.redeemed || 0) - (it.cost || 0)); return { note: `Pedido recusado: <b>${esc(it.title)}</b>. ${it.cost} XP de resgate devolvidos.` }; }
     if (it.kind === 'reqok') return { note: `Pedido aprovado: <b>${esc(it.title)}</b>` };
-    if (it.kind === 'delivered') return { note: `Recompensa entregue: <b>${esc(it.title)}</b>. Aproveite!` };
+    if (it.kind === 'delivered') return { note: `Prêmio entregue: <b>${esc(it.title)}</b>. Aproveite!` };
     if (it.kind === 'gold') { h.bonusGold = (h.bonusGold || 0) + (it.gold || 0); const ups = it.xp ? grantXp(h, it.xp) : 0; return { ups, note: `${esc(it.title || 'Prêmio')}: <span class="coin"></span> ${it.gold || 0}${it.xp ? ` e ${it.xp} XP` : ''}` }; }
     return null;
   }
   /* ---------------- Sons (sintetizados, sem arquivos) ---------------- */
+  /* ----- Som: paleta de fantasia gerada no navegador (sem arquivos) -----
+     Efeitos e música com volumes separados, um leve eco de salão, silêncio à noite e vibração no celular. */
+  try { const m = lsGet('guilda-motion', null); if (m === 'less' || (m == null && matchMedia('(prefers-reduced-motion: reduce)').matches)) document.documentElement.classList.add('reduce-motion'); } catch (e) { /* ok */ }
   const Sound = {
-    ctx: null, on: lsGet('guilda-sound', true), musicTimer: null, last: 0,
-    unlocked: false,
-    ensure() { if (!this.unlocked) return null; if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { this.ctx = null; } } if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {}); return this.ctx; },
-    tone(f, dur, type, vol, at, slideTo) {
+    ctx: null, on: lsGet('guilda-sound', true), musicTimer: null, last: 0, unlocked: false,
+    vol: Object.assign({ fx: 0.8, music: 0.5, night: false }, lsGet('guilda-vol', {})),
+    bus: null, mbus: null,
+    ensure() {
+      if (!this.unlocked) return null;
+      if (!this.ctx) {
+        try {
+          const c = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+          // eco curto de salão: resposta ao impulso gerada (ruído que some em 1,2 s)
+          const len = Math.floor(c.sampleRate * 1.2), ir = c.createBuffer(2, len, c.sampleRate);
+          for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let k = 0; k < len; k++) d[k] = (Math.random() * 2 - 1) * Math.pow(1 - k / len, 3); }
+          const rev = c.createConvolver(); rev.buffer = ir; const wet = c.createGain(); wet.gain.value = 0.18; rev.connect(wet).connect(c.destination);
+          this.bus = c.createGain(); this.bus.connect(c.destination); this.bus.connect(rev);
+          this.mbus = c.createGain(); this.mbus.connect(c.destination);
+          this.applyVol();
+        } catch (e) { this.ctx = null; }
+      }
+      if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      return this.ctx;
+    },
+    applyVol() { if (this.bus) this.bus.gain.value = this.vol.fx * 1.6; if (this.mbus) this.mbus.gain.value = this.vol.music * 1.6; },
+    setVol(k, v) { this.vol[k] = v; lsSet('guilda-vol', this.vol); this.applyVol(); },
+    // modo silêncio à noite: das 21h às 7h só vibra
+    quiet() { if (!this.vol.night) return false; const h = new Date().getHours(); return h >= 21 || h < 7; },
+    buzz(p) { try { if (navigator.vibrate && !document.hidden) navigator.vibrate(p); } catch (e) { /* ok */ } },
+    // nota com ataque suave e queda natural (sino, madeira, cordas)
+    tone(f, dur, type, vol, at, slideTo, out) {
       const c = this.ctx; if (!c) return; const t0 = c.currentTime + (at || 0);
-      const o = c.createOscillator(), g = c.createGain(); o.type = type || 'square'; o.frequency.setValueAtTime(f, t0); if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
-      g.gain.setValueAtTime(vol || 0.05, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur); o.connect(g).connect(c.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+      const o = c.createOscillator(), g = c.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f, t0); if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol || 0.05, t0 + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g).connect(out || this.bus || c.destination); o.start(t0); o.stop(t0 + dur + 0.05);
     },
-    noise(dur, vol, at) {
+    bell(f, at, vol, dur) { this.tone(f, dur || 0.6, 'sine', vol || 0.05, at); this.tone(f * 2.76, (dur || 0.6) * 0.45, 'sine', (vol || 0.05) * 0.25, at); this.tone(f * 5.4, (dur || 0.6) * 0.2, 'sine', (vol || 0.05) * 0.08, at); },
+    noise(dur, vol, at, freq) {
       const c = this.ctx; if (!c) return; const t0 = c.currentTime + (at || 0); const n = Math.floor(c.sampleRate * dur); const buf = c.createBuffer(1, n, c.sampleRate); const d = buf.getChannelData(0);
-      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n); const src = c.createBufferSource(), g = c.createGain(), f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1400;
-      src.buffer = buf; g.gain.value = vol || 0.08; src.connect(f).connect(g).connect(c.destination); src.start(t0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n); const src = c.createBufferSource(), g = c.createGain(), f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = freq || 1400;
+      src.buffer = buf; g.gain.value = vol || 0.08; src.connect(f).connect(g).connect(this.bus || c.destination); src.start(t0);
     },
-    play(k) {
-      if (!this.on || !this.ensure()) return;
-      const now = performance.now(); if (['hit', 'crit', 'magic', 'twinkle'].includes(k) && now - this.last < 70) return; this.last = now;
+    play(k, n) {
+      const big = { level: [60, 40, 60, 40, 120], task: 18, win: [40, 30, 40] };
+      if (big[k] && (!this.on || this.quiet())) { this.buzz(big[k]); if (!this.on) return; }
+      if (!this.on || this.quiet() || !this.ensure()) return;
+      const now = performance.now();
+      if (['hit', 'crit', 'magic', 'twinkle'].includes(k) && now - this.last < 70) return;
+      if (['tap', 'coin', 'kudos', 'undo', 'error'].includes(k) && now - this.last < 120) return; // um som de interface por vez
+      this.last = now;
       const T = (f, d, ty, v, a, sl) => this.tone(f, d, ty, v, a, sl);
+      const scale = [523, 587, 659, 784, 880, 988, 1047, 1175];
       switch (k) {
-        case 'task': T(523, 0.08, 'square', 0.04); T(659, 0.08, 'square', 0.04, 0.07); T(784, 0.14, 'square', 0.04, 0.14); break;
-        case 'level': [523, 659, 784, 1047].forEach((f, i) => T(f, 0.16, 'square', 0.05, i * 0.1)); T(1319, 0.4, 'triangle', 0.05, 0.42); break;
-        case 'chest': [880, 1175, 1568, 2093].forEach((f, i) => T(f, 0.12, 'triangle', 0.045, i * 0.06)); break;
-        case 'hit': this.noise(0.08, 0.07); T(140, 0.08, 'square', 0.035, 0, 70); break;
-        case 'crit': this.noise(0.14, 0.11); T(220, 0.16, 'sawtooth', 0.05, 0, 60); break;
-        case 'magic': T(660, 0.18, 'triangle', 0.035, 0, 1320); break;
-        case 'twinkle': [1319, 1568, 1976, 2637].forEach((f, i) => T(f, 0.09, 'sine', 0.03, i * 0.045)); T(3136, 0.25, 'triangle', 0.015, 0.18); break;
-        case 'heal': T(523, 0.12, 'sine', 0.05, 0, 784); T(784, 0.16, 'sine', 0.04, 0.08, 1047); break;
-        case 'ko': T(330, 0.3, 'square', 0.04, 0, 82); break;
-        case 'win': [392, 523, 659, 784].forEach((f, i) => T(f, 0.14, 'square', 0.05, i * 0.12)); T(1047, 0.6, 'square', 0.05, 0.5); T(523, 0.6, 'triangle', 0.05, 0.5); break;
-        case 'loss': [392, 349, 311, 262].forEach((f, i) => T(f, 0.24, 'triangle', 0.05, i * 0.22)); break;
+        case 'tap': this.noise(0.03, 0.025, 0, 2400); T(220, 0.05, 'triangle', 0.02); break; // clique de madeira, bem baixo
+        case 'task': { const f = scale[Math.min(scale.length - 1, Math.max(0, (n || 1) - 1))]; this.bell(f, 0, 0.06, 0.7); this.bell(f * 1.5, 0.08, 0.035, 0.6); if (big.task) this.buzz(big.task); break; } // sobe uma nota a cada tarefa do dia
+        case 'level': [523, 659, 784].forEach((f) => this.bell(f, 0, 0.045, 1.4)); [659, 784, 1047].forEach((f) => this.bell(f, 0.32, 0.045, 1.6)); T(1568, 0.9, 'triangle', 0.02, 0.6); this.buzz(big.level); break;
+        case 'chest': this.noise(0.12, 0.05, 0, 900); [880, 1175, 1568, 2093].forEach((f, i) => this.bell(f, 0.08 + i * 0.07, 0.03, 0.5)); break;
+        case 'kudos': [1568, 2093, 2637].forEach((f, i) => this.bell(f, i * 0.05, 0.028, 0.45)); break; // plim cintilante
+        case 'mvp': [523, 659, 784, 1047].forEach((f, i) => T(f, 0.22, 'triangle', 0.045, i * 0.11)); this.bell(1319, 0.46, 0.05, 1.2); break;
+        case 'coin': [1976, 2637].forEach((f, i) => this.bell(f, i * 0.06, 0.03, 0.25)); this.noise(0.05, 0.02, 0.02, 5000); break;
+        case 'prize': this.noise(0.1, 0.04, 0, 800); [784, 988, 1175, 1568].forEach((f, i) => this.bell(f, 0.06 + i * 0.08, 0.035, 0.6)); break;
+        case 'undo': { const f = 784; this.tone(f * 1.5, 0.14, 'sine', 0.035, 0, f); this.tone(f, 0.18, 'sine', 0.03, 0.08, f * 0.75); break; } // o som de concluir ao contrário
+        case 'error': T(196, 0.16, 'triangle', 0.05); T(185, 0.2, 'triangle', 0.04, 0.09); break;
+        case 'hit': this.noise(0.08, 0.07); T(120, 0.1, 'triangle', 0.05, 0, 60); break;
+        case 'crit': this.noise(0.14, 0.11, 0, 1000); T(180, 0.18, 'sawtooth', 0.04, 0, 55); break;
+        case 'magic': T(660, 0.22, 'sine', 0.04, 0, 1320); T(990, 0.18, 'triangle', 0.015, 0.03, 1760); break;
+        case 'twinkle': [1319, 1568, 1976, 2637].forEach((f, i) => this.bell(f, i * 0.045, 0.022, 0.4)); break;
+        case 'heal': T(523, 0.18, 'sine', 0.05, 0, 784); T(784, 0.22, 'sine', 0.04, 0.08, 1047); break;
+        case 'ko': T(262, 0.4, 'triangle', 0.05, 0, 82); break;
+        case 'win': [392, 523, 659, 784].forEach((f, i) => T(f, 0.2, 'triangle', 0.05, i * 0.12)); [523, 659, 784, 1047].forEach((f) => this.bell(f, 0.52, 0.04, 1.5)); this.buzz(big.win); break;
+        case 'loss': [392, 349, 311, 262].forEach((f, i) => T(f, 0.3, 'triangle', 0.05, i * 0.22)); break;
       }
     },
-    // trilha de batalha em loop (8 compassos simples)
+    // trilha de batalha em loop; a escala muda conforme a região do estágio
     music(start) {
       clearInterval(this.musicTimer); this.musicTimer = null;
-      if (!start || !this.on || !this.ensure()) return;
-      const bass = [110, 110, 131, 98, 110, 110, 147, 131], mel = [440, 523, 494, 440, 392, 440, 523, 587, 659, 587, 523, 494, 440, 392, 349, 392];
+      if (!start || !this.on || this.quiet() || !this.ensure()) return;
+      const reg = Math.floor(((S.party && S.party.stage) || 1) / 10) % 3;
+      const roots = [110, 98, 123][reg];
+      const bass = [1, 1, 1.19, 0.89, 1, 1, 1.335, 1.19].map((r) => roots * r);
+      const mel = [[440, 523, 494, 440, 392, 440, 523, 587, 659, 587, 523, 494, 440, 392, 349, 392], [392, 466, 440, 392, 349, 392, 466, 523, 587, 523, 466, 440, 392, 349, 311, 349], [494, 587, 554, 494, 440, 494, 587, 659, 740, 659, 587, 554, 494, 440, 392, 440]][reg];
       let step = 0;
-      const tick = () => { if (!this.on) return; const b = bass[Math.floor(step / 2) % bass.length]; if (step % 2 === 0) this.tone(b, 0.22, 'triangle', 0.05); if (step % 4 !== 3) this.tone(mel[step % mel.length], 0.11, 'square', 0.018); step++; };
+      const tick = () => { if (!this.on) return; const b = bass[Math.floor(step / 2) % bass.length]; if (step % 2 === 0) this.tone(b, 0.26, 'triangle', 0.06, 0, null, this.mbus); if (step % 4 !== 3) this.tone(mel[step % mel.length], 0.14, 'triangle', 0.022, 0, null, this.mbus); step++; };
       tick(); this.musicTimer = setInterval(tick, 230);
     },
-    toggle() { this.on = !this.on; lsSet('guilda-sound', this.on); if (!this.on) this.music(false); else { this.ensure(); this.play('task'); if (S.modal && S.modal.type === 'replay' && !S.modal.finished) this.music(true); } },
+    toggle() { this.on = !this.on; lsSet('guilda-sound', this.on); if (!this.on) this.music(false); else { this.ensure(); this.play('kudos'); if (S.modal && S.modal.type === 'replay' && !S.modal.finished) this.music(true); } },
   };
   document.addEventListener('pointerdown', () => { Sound.unlocked = true; if (Sound.on) Sound.ensure(); }, { once: true, capture: true });
 
@@ -826,15 +870,19 @@
     if (S.stale) html += `<div class="banner ro">Ainda não deu para confirmar os dados mais recentes da guilda. O que aparece aqui pode estar desatualizado.</div>`;
     if (S.readOnly) html += `<div class="banner ro">Você pode ver a guilda, mas não editar. Peça para o dono da página te dar acesso de edição.</div>`;
     if (!S.room) S.view = 'rooms';
-    else if (['home', 'hero', 'settings', 'bestiary', 'report'].includes(S.view) && !(S.me && S.heroes[S.me])) S.view = 'select';
+    else if (['home', 'today', 'prizes', 'hero', 'settings', 'bestiary', 'report'].includes(S.view) && !(S.me && S.heroes[S.me])) S.view = 'select';
     if (S.view === 'rooms') html += roomsView();
     else if (S.view === 'select') html += selectView();
     else if (S.view === 'create') html += createView();
-    else if (S.view === 'settings') html += settingsView();
+    else if (S.view === 'settings') html += settingsLayout(settingsView());
     else if (S.view === 'bestiary' && S.me) html += bestiaryView();
     else if (S.view === 'report' && S.me) html += reportView();
-    else if (S.view === 'hero' && S.heroId === S.me && S.heroes[S.me]) html += heroView(S.heroes[S.me]);
+    else if (S.view === 'hero' && S.heroes[S.me]) { S.heroId = S.me; html += heroView(S.heroes[S.me]); }
+    else if (S.view === 'today' && S.heroes[S.me]) html += todayView(S.heroes[S.me]);
+    else if (S.view === 'prizes' && S.heroes[S.me]) html += prizesView(S.heroes[S.me]);
     else { S.view = 'home'; html += homeView(); }
+    html += tabbar();
+    document.body.classList.toggle('has-tabbar', !!(S.room && S.me && S.heroes[S.me] && !['rooms', 'select', 'create'].includes(S.view)));
     if (!document.getElementById('page')) $app.innerHTML = '<div id="page"></div><div id="overlay"></div><div id="toast-root"></div>';
     document.getElementById('page').innerHTML = `<div class="wrap">${html}</div>`;
     const ov = document.getElementById('overlay');
@@ -850,22 +898,19 @@
 
   /* ---------------- Tutorial passo a passo ---------------- */
   const TUT = [
-    { view: 'home', title: 'Bem-vindo à guilda!', text: (h) => `Olá, ${h.name}! Aqui cada tarefa vira experiência para o seu herói. ${Store.server ? 'Ele fica ligado à sua conta: só você e o organizador da sala jogam com ele. ' : ''}Vou mostrar o caminho em poucos passos.` },
-    { view: 'home', sel: '.nightfight', title: 'A batalha da noite', text: () => 'Toda meia-noite a guilda enfrenta os inimigos deste card. Aqui ficam o desafio, a dificuldade e a chance de vitória. Vencer dá ouro e avança de estágio.' },
-    { view: 'home', sel: '.slot.mine', title: 'Este é você', text: () => 'Seu herói fica no salão junto com o resto da guilda. Toque nele para abrir a página dele.' },
-    { view: 'home', sel: '.hero-cta', title: 'Desenvolva o seu herói', text: () => 'Tarefas, habilidades, loja, conquistas e visual ficam na página do herói. Este botão leva direto para lá.' },
-    { view: 'home', sel: '.slot.other .kudos-btn', title: 'Elogios com emoji', text: () => `Elogie alguém com um emoji: a pessoa ganha XP e o emoji fica embaixo do herói até a meia-noite. Você tem ${D.KUDOS_PER_DAY} elogios por dia, um para cada pessoa.` },
-    { view: 'home', sel: '.board', title: 'Quadro da guilda', text: () => 'Missões da casa, com o rosto de quem é responsável. Use os botões acima da lista para ver só as de uma pessoa. Quem cumprir primeiro leva a experiência; ↺ desfaz.' },
-    { view: 'home', sel: '.mvp-day', title: 'Destaque do dia', text: () => `Quem somar mais XP em tarefas no dia ganha moedas extras à meia-noite, vencendo ou perdendo a batalha.${xpCap() ? ` Nesta sala há um limite de ${xpCap()} XP de tarefas por dia: depois dele, as tarefas ainda contam para o destaque.` : ''}` },
-    { view: 'hero', tab: 'tarefas', sel: '.addtask', title: 'Suas tarefas', text: () => 'Escreva o que vai fazer e escolha a dificuldade e a frequência. Dá para agendar para um dia futuro. Fez sem querer? O botão ↺ desfaz e tira o XP.' },
-    { view: 'hero', tab: 'tarefas', sel: '.kudos-sum', title: 'Seus elogios', text: () => 'Aqui fica o resumo de todos os elogios que você já recebeu, por emoji.' },
-    { view: 'hero', tab: 'tarefas', sel: '.tabs', title: 'Tudo sobre o seu herói', text: () => 'Recompensas da vida real, habilidades, loja, medalhas e visual (roupas temáticas e aniversário) ficam nestas abas.' },
-    { view: 'hero', tab: 'habilidades', sel: '.tree', title: 'Habilidades', text: () => 'Cada nível dá 1 ponto. Gaste aqui: as habilidades deixam o herói bem mais forte na batalha. A árvore vai até o nível 50.' },
-    { view: 'hero', tab: 'loja', sel: '.shop-cats', title: 'Loja', text: () => 'Use o ouro das vitórias em equipamentos, poções e itens de estilo. Toque na imagem de um item para ver de perto.' },
-    { view: 'home', sel: '.nav-btn', title: 'Menu', text: () => `Todas as partes do app estão neste menu: salão, cada aba do herói, bestiário, convite${isCreator() ? ', configurações e relatório' : ''}, trocar de sala e sair da conta.` },
-    { view: 'home', sel: '.sessbar [data-act=invite]', title: 'Convidar o pessoal', text: () => 'Gere um link e mande no WhatsApp: quem abrir entra direto na sala e cria o próprio herói.' },
-    { view: 'home', sel: '.nav-btn', title: 'Para o organizador', skip: () => !isCreator(), text: () => 'Em Menu → Configurações você muda o nome e as vagas da sala, o limite diário de XP, o bônus do destaque, aprovação de tarefas, personagens importados, reabre tarefas feitas e expulsa heróis.' },
-    { view: 'home', sel: '.nav-btn', title: 'Pronto para a aventura!', text: () => 'Para rever este passo a passo quando quiser, abra o Menu e toque em Tutorial.' },
+    { view: 'today', title: `Bem-vindo ao ${APP_NAME}!`, text: (h) => `Olá, ${h.name}! Aqui cada tarefa vira experiência para o seu herói e força para a guilda. ${Store.server ? 'O herói fica ligado à sua conta: só você e o organizador jogam com ele. ' : ''}São poucos passos.` },
+    { view: 'today', sel: '.tabbar', title: 'Cinco lugares, sempre à mão', text: () => `Hoje é o que fazer no dia. Guilda é o salão e a batalha. Herói é onde ele evolui. Prêmios é onde XP vira prêmio de verdade.${isCreator() ? ' Sala, só para o organizador, guarda as regras e as pendências.' : ''}` },
+    { view: 'today', sel: '.quickadd', title: 'Crie uma tarefa', text: () => 'Escreva o que vai fazer, escolha a dificuldade e toque em Adicionar. Em "Mais opções" dá para repetir, agendar, pôr horário ou mandar para a guilda.' },
+    { view: 'today', sel: '.daystrip', title: 'Seu dia num olhar', text: () => `XP de hoje${xpCap() ? ` (o limite da sala é ${xpCap()})` : ''}, tarefas feitas, sequência de dias e quem está em destaque. O destaque ganha ouro extra à meia-noite.` },
+    { view: 'today', sel: '.today .tasks', title: 'Concluir e desfazer', text: () => 'Toque no círculo para concluir. Toque no texto da tarefa para ver Editar, Desfazer e Apagar.' },
+    { view: 'home', sel: '.nightfight', title: 'A batalha da meia-noite', text: () => 'Toda meia-noite a guilda enfrenta estes inimigos. Vencer dá ouro e avança de estágio. A chance aparece também no topo, ao lado da contagem.' },
+    { view: 'home', sel: '.slot.other .kudos-btn', title: 'Elogios', text: () => `Elogie alguém com um emoji: a pessoa ganha XP. Você tem ${D.KUDOS_PER_DAY} elogios por dia, um para cada pessoa.` },
+    { view: 'hero', tab: 'habilidades', sel: '.tree', title: 'Evoluir', text: () => 'Cada nível dá 1 ponto. Gaste na árvore de habilidades. Dá para refazer tudo de graça ou trocar de classe sem perder o nível.' },
+    { view: 'hero', tab: 'loja', sel: '.shop-cats', title: 'Equipar', text: () => 'O ouro das batalhas compra equipamentos, poções e roupas. Em Visual você muda a aparência, inclusive com roupas temáticas.' },
+    { view: 'prizes', sel: '.rewards, .view-h', title: 'Prêmios', text: () => 'O XP que você ganha vira saldo para pedir prêmios de verdade, combinados com o organizador. A barra mostra quanto falta.' },
+    { view: 'today', sel: '.nav-btn', title: 'Seu menu', text: () => 'No seu rosto, no canto: trocar de herói ou de sala, convidar pessoas, som, menos animação, tutorial e sair da conta.' },
+    { view: 'today', sel: '.tabbar [data-v=settings]', title: 'Para o organizador', skip: () => !isCreator(), text: () => 'Na aba Sala ficam as pendências (pedidos, aprovações, feitas hoje) e quatro grupos: Pessoas, Regras do jogo, Prêmios e Sala e segurança.' },
+    { view: 'today', title: 'Pronto para a aventura!', text: () => 'Para rever este passo a passo, abra o seu menu no canto e toque em Tutorial.' },
   ];
   const tutOff = () => { try { return localStorage.getItem('guilda-notut') === '1'; } catch (e) { return false; } };
   function maybeStartTut() {
@@ -878,7 +923,7 @@
   function tutGo(i, dir) {
     while (i >= 0 && i < TUT.length) {
       const st = TUT[i];
-      if (st.view === 'home') { S.view = 'home'; S.heroId = null; } else { S.view = 'hero'; S.heroId = S.me; S.tab = st.tab || 'tarefas'; }
+      if (st.view === 'hero') { S.view = 'hero'; S.heroId = S.me; S.tab = st.tab || 'habilidades'; } else { S.view = st.view; S.heroId = null; }
       S.tut.i = i; render();
       if (!(st.skip && st.skip()) && (!st.sel || document.querySelector(st.sel))) break;
       i += dir;
@@ -924,14 +969,51 @@
     const m = Math.max(0, Math.round((mid - n) / 60000)); return `${Math.floor(m / 60)}h ${pad(m % 60)}min`;
   }
   function topbar() {
-    const inRoom = S.room && !['rooms'].includes(S.view);
+    const inRoom = S.room && S.view !== 'rooms';
     const me = S.me && S.heroes[S.me];
     const title = (S.roomMeta && S.roomMeta.name) || APP_NAME;
-    const back = ['hero', 'create', 'settings', 'bestiary', 'report'].includes(S.view) && S.me ? `<button class="back" data-act="home">← Salão</button>` : '';
-    return `<header class="topbar"><div class="brand">${back}<h1>${esc(inRoom ? title : APP_NAME)}</h1>${inRoom ? `<span class="app-tag">${APP_NAME}</span>` : ''}</div>
-      ${inRoom ? `<div class="chips">${Acct.on() && S.acct.rooms.length > 1 ? `<label class="chip room-sw"><span class="sr-only">Trocar de sala</span><select id="room-switch" aria-label="Trocar de sala">${S.acct.rooms.map((r) => `<option value="${esc(r.code)}" ${r.code === S.room ? 'selected' : ''}>${esc(r.name || r.code)} · ${esc(r.code)}</option>`).join('')}</select></label>` : `<span class="chip">Sala <b class="num">${esc(S.room)}</b></span>`}${S.party && S.view !== 'select' ? `<span class="chip">Estágio <b class="num">${stage()}</b> · ${esc(E.regionOf(stage()).name)}</span><span class="chip warn">Batalha à meia-noite · <b class="num">${countdown()}</b></span>` : ''}</div>` : ''}</header>
-      ${inRoom ? `<div class="sessbar">${me ? `<span class="who">${A.heroSvg(me, { noPet: true, noWeapon: true })}<span>Jogando como <b>${esc(me.name)}</b> ${roleTag(me)}</span></span>` : '<span class="muted">Escolha seu personagem</span>'}
-        <span class="spacer"></span>${canInvite() ? '<button class="btn sm" data-act="invite">Convidar</button>' : ''}<button class="btn sm ghost" data-act="toggleSound" aria-pressed="${Sound.on}">${Sound.on ? 'Som ligado' : 'Som desligado'}</button>${navMenu(me)}</div>` : ''}`;
+    if (!inRoom) return `<header class="topbar tb"><div class="tb-brand"><h1 class="tb-title">${APP_NAME}</h1></div>${S.acct ? acctMenu(null) : ''}</header>`;
+    const multi = Acct.on() && S.acct.rooms.length > 1;
+    const roomEl = multi ? `<label class="tb-room-sel"><span class="sr-only">Trocar de sala</span><select id="room-switch" aria-label="Trocar de sala">${S.acct.rooms.map((r) => `<option value="${esc(r.code)}" ${r.code === S.room ? 'selected' : ''}>${esc(r.name || r.code)}</option>`).join('')}</select></label>` : `<h1 class="tb-title">${esc(title)}</h1>`;
+    const ch = S.chance; const cls = ch == null ? '' : ch >= 0.66 ? 'hi' : ch >= 0.33 ? 'mid' : 'lo';
+    const battle = S.party && me ? `<button class="tb-battle" data-act="go" data-v="home" title="Batalha à meia-noite: tempo que falta e chance de vitória"><span aria-hidden="true">⏳</span> <b class="num">${countdown()}</b>${ch != null ? ` <span class="sep">·</span> <b class="num pct ${cls}">${Math.round(ch * 100)}%</b>` : ''}</button>` : '';
+    return `<header class="topbar tb">${me ? `<span class="sr-only">Jogando como ${esc(me.name)}</span>` : ''}<div class="tb-brand">${roomEl}<span class="app-tag">${APP_NAME} · sala <b class="num">${esc(S.room)}</b></span></div>${battle}${acctMenu(me)}</header>`;
+  }
+  // barra de abas: embaixo no celular, no alto no computador
+  const NAV_ICONS = {
+    today: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V9l4-3v3l4-4 4 4V6l4 3v12h-6v-5h-4v5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    hero: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 11a6 6 0 0 1 12 0v3H6Z M12 14v7 M8 21h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><path d="M12 5V2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    prizes: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h16v4H4Z M5 14h14v7H5Z M12 10v11 M12 10c-2-4-6-4-6-1.5S10 10 12 10c2 0 6 .5 6-1.5S14 6 12 10Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  };
+  const navCur = () => ({ today: 'today', home: 'home', bestiary: 'home', hero: 'hero', prizes: 'prizes', settings: 'settings', report: 'settings' })[S.view] || '';
+  function pendingCount() { try { return openRequests().length + pendingItems().length; } catch (e) { return 0; } }
+  function prizeReady(h) { try { const bal = redeemBal(h); return rewardList().filter((r) => bal >= r.cost && !rewardBlock(r, h)).length; } catch (e) { return 0; } }
+  function tabbar() {
+    const me = S.me && S.heroes[S.me]; if (!me || !S.room) return '';
+    const tabs = [['today', 'Hoje', 0], ['home', 'Guilda', 0], ['hero', 'Herói', me.points || 0], ['prizes', 'Prêmios', prizeReady(me)]];
+    if (isCreator()) tabs.push(['settings', 'Sala', pendingCount()]);
+    const cur = navCur();
+    return `<nav class="tabbar" aria-label="Seções do app">${tabs.map(([v, n, b]) => `<button data-act="go" data-v="${v}" aria-current="${cur === v ? 'page' : 'false'}"><span class="ti">${NAV_ICONS[v]}</span><span class="tl">${n}</span>${b ? `<span class="dot" aria-label="${b} ${v === 'settings' ? 'pendências' : v === 'prizes' ? 'prêmios disponíveis' : 'pontos livres'}">${b}</span>` : ''}</button>`).join('')}</nav>`;
+  }
+  // menu da conta: abre no rosto do herói, no canto do topo
+  function acctMenu(me) {
+    const it = (v, label, sub) => `<button class="nav-it" role="menuitem" data-act="navGo" data-v="${v}"><span>${label}</span>${sub ? `<span class="small muted">${sub}</span>` : ''}</button>`;
+    const face = me ? A.heroSvg(me, { noPet: true, noWeapon: true }) : `<span class="tb-ini">${esc(((S.acct && S.acct.email) || '?').slice(0, 1).toUpperCase())}</span>`;
+    const night = Sound.vol.night, rm = document.documentElement.classList.contains('reduce-motion');
+    return `<div class="navmenu${S.navOpen ? ' open' : ''}"><button class="nav-btn tb-me" data-act="navToggle" aria-haspopup="menu" aria-expanded="${!!S.navOpen}" aria-label="Menu da conta">${face}<span class="caret" aria-hidden="true">▾</span></button>
+      ${S.navOpen ? `<div class="nav-pop" role="menu">
+        ${me ? `<div class="nav-who">${A.heroSvg(me, { noPet: true, noWeapon: true })}<div><b>${esc(me.name)}</b> ${roleTag(me)}<div class="small muted">${esc(D.CLASSES[me.cls].name)} · nível ${me.level}</div></div></div>` : ''}
+        ${S.room ? `${me ? it('switchHero', 'Trocar de herói') : ''}${it('leaveRoom', 'Trocar de sala')}${canInvite() ? it('invite', 'Convidar pessoas', 'link para mandar no WhatsApp') : ''}${me ? it('tutorial', 'Tutorial', 'como tudo funciona') : ''}${me && S.party && S.party.last ? it('replay', 'Rever a última batalha') : ''}` : ''}
+        <div class="nav-g">Som e animação</div>
+        <div class="nav-set"><label class="check"><input type="checkbox" data-act="toggleSound" ${Sound.on ? 'checked' : ''}> Som</label>
+          <label class="rng">Efeitos <input type="range" id="vol-fx" min="0" max="1" step="0.05" value="${Sound.vol.fx}" ${Sound.on ? '' : 'disabled'}></label>
+          <label class="rng">Música <input type="range" id="vol-music" min="0" max="1" step="0.05" value="${Sound.vol.music}" ${Sound.on ? '' : 'disabled'}></label>
+          <label class="check"><input type="checkbox" data-act="toggleNight" ${night ? 'checked' : ''}> Silêncio à noite <span class="small muted">(21h às 7h, só vibra)</span></label>
+          <label class="check"><input type="checkbox" data-act="toggleMotion" ${rm ? 'checked' : ''}> Menos animação</label></div>
+        ${Acct.on() ? `<div class="nav-g">Conta</div>${it('logout', 'Sair da conta', esc(S.acct.email))}` : ''}
+      </div>` : ''}</div>`;
   }
   /* ----- Convite por link ----- */
   const canInvite = () => !!Store.server && /^https?:$/.test(location.protocol) && !!S.room;
@@ -940,19 +1022,6 @@
     try { const q = new URLSearchParams(location.search).get('sala') || (location.hash.match(/sala=([A-Za-z0-9]{6})/) || [])[1]; const c = q ? normCode(q) : ''; return c.length === 6 ? c : null; } catch (e) { return null; }
   }
   const inviteText = () => `Venha para a nossa guilda "${(S.roomMeta && S.roomMeta.name) || APP_NAME}" no ${APP_NAME} e transforme as tarefas em aventura! Entre por este link:`;
-  /* ----- Menu suspenso com todas as partes do app ----- */
-  const HERO_TABS = [['tarefas', 'Tarefas', 'o que fazer hoje'], ['recompensas', 'Recompensas', 'troque XP por prêmios'], ['habilidades', 'Habilidades', 'evolua o herói'], ['loja', 'Loja', 'equipamentos, roupas e poções'], ['conquistas', 'Conquistas', 'medalhas'], ['visual', 'Visual', 'aparência e aniversário']];
-  function navMenu(me) {
-    const it = (act, label, sub, extra) => `<button class="nav-it" role="menuitem" data-act="${act}" ${extra || ''}><span>${label}</span>${sub ? `<span class="small muted">${sub}</span>` : ''}</button>`;
-    const badge = me && me.points ? `<span class="dot">${me.points}</span>` : '';
-    return `<div class="navmenu${S.navOpen ? ' open' : ''}"><button class="btn sm primary nav-btn" data-act="navToggle" aria-haspopup="menu" aria-expanded="${!!S.navOpen}">Menu ▾${badge}</button>
-      ${S.navOpen ? `<div class="nav-pop" role="menu">
-        ${me ? `<div class="nav-g">Guilda</div>${it('navGo', 'Salão da guilda', 'batalha, quadro e ranking', 'data-v="home"')}${it('navGo', 'Bestiário', 'monstros já enfrentados', 'data-v="bestiary"')}${S.party && S.party.last ? it('navGo', 'Rever última batalha', '', 'data-v="replay"') : ''}
-        <div class="nav-g">Meu herói · ${esc(me.name)}</div>${HERO_TABS.map(([k, n, sub]) => it('navGo', n + (k === 'habilidades' && me.points ? ` <span class="dot">${me.points}</span>` : ''), sub, `data-v="tab:${k}"`)).join('')}` : ''}
-        <div class="nav-g">Sala</div>${isCreator() && me ? it('navGo', 'Configurações', 'regras, heróis e convites', 'data-v="settings"') + it('navGo', 'Relatório semanal', '', 'data-v="report"') : ''}${canInvite() ? it('navGo', 'Convidar pessoas', 'link para o pessoal', 'data-v="invite"') : ''}${me ? it('navGo', 'Tutorial', 'como tudo funciona', 'data-v="tutorial"') : ''}${me ? it('navGo', 'Trocar personagem', '', 'data-v="switchHero"') : ''}${it('navGo', 'Trocar de sala', '', 'data-v="leaveRoom"')}
-        ${Acct.on() ? `<div class="nav-g">Conta</div>${it('navGo', 'Sair da conta', esc(S.acct.email), 'data-v="logout"')}` : ''}
-      </div>` : ''}</div>`;
-  }
   const adminBadge = () => pendingItems().length + (typeof openRequests === 'function' ? openRequests().length : 0);
   /* ----- Entrada: código da sala ----- */
   function roomsView() {
@@ -960,7 +1029,7 @@
     if (needAcct()) {
       const inv = S.pendingInvite || sessGet('guilda-invite');
       return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Tarefas viram aventura</div><h2>Entre na sua conta</h2>
-        <p class="muted">Cada pessoa usa a própria conta. Assim o seu personagem fica ligado a você e ninguém mais mexe nele.</p>
+        <p class="muted">Cada pessoa usa a própria conta. Assim o seu herói fica ligado a você e ninguém mais mexe nele.</p>
         ${inv ? `<div class="invite-hi">Você recebeu um convite para a sala <b class="num">${esc(inv)}</b>. Entre ou crie uma conta e a gente te leva até lá.</div>` : ''}</div>
         ${accountCard()}</section>`;
     }
@@ -991,7 +1060,7 @@
             ${S.authErr ? `<p class="small" style="color:var(--bad);margin:0">${esc(S.authErr)}</p>` : ''}
             <div class="row"><button class="btn primary" type="submit" ${S.authBusy ? 'disabled' : ''}>Criar senha nova</button><button class="btn ghost" type="button" data-act="authMode" data-v="login">Voltar</button></div>
           </form>
-          <p class="small muted" style="margin:10px 0 0">Perdeu o código também? Peça ao organizador da sala para criar um personagem novo para você numa conta nova.</p></section>`;
+          <p class="small muted" style="margin:10px 0 0">Perdeu o código também? Peça ao organizador da sala para criar um herói novo para você numa conta nova.</p></section>`;
       }
       return `<section class="card acct-card"><div class="card-h"><div><div class="eyebrow">Sua conta</div><h3>Entrar com e-mail</h3></div><span class="small muted">Com a conta, suas salas ficam reunidas e você troca entre elas num toque, em qualquer aparelho.</span></div>
         <form class="acct-form" data-form="login">
@@ -1014,18 +1083,18 @@
     const cards = hs.map((h) => {
       const c = D.CLASSES[h.cls];
       const mine = acct && h.owner === myAcct(); const free = acct && !h.owner; const locked = acct && !mine && !org && !free;
-      const tag = !acct ? '' : mine ? '<span class="tag own">Seu personagem</span>' : free ? '<span class="tag free">Sem conta ligada</span>' : org ? '<span class="tag org">Você controla (organizador)</span>' : '<span class="tag lock">De outra pessoa</span>';
+      const tag = !acct ? '' : mine ? '<span class="tag own">Seu herói</span>' : free ? '<span class="tag free">Sem conta ligada</span>' : org ? '<span class="tag org">Você controla (organizador)</span>' : '<span class="tag lock">De outra pessoa</span>';
       return `<button class="pickme${locked ? ' locked' : ''}" data-act="pickMe" data-id="${h.id}" ${locked ? 'aria-disabled="true"' : ''}><span class="lv num">Nv ${h.level}</span><div class="fig"><div class="idle">${A.heroSvg(h)}</div></div><div class="nm">${esc(h.name)}</div><div class="cl"><span style="color:${c.color}">${c.name}</span> · ${ancOf(h).name}</div>${roleTag(h)}${tag}</button>`;
     }).join('');
     const invited = S.invited === S.room; const canNew = canCreateHero() && !S.readOnly;
     const full = hs.length >= roomSlots();
     const imp = acct ? (S.acct.rooms || []).filter((r) => r.code !== S.room && r.hero) : [];
     const impCard = imp.length && canNew ? (S.party && S.party.allowImport
-      ? `<section class="card import-card"><div class="card-h"><div><div class="eyebrow">Da sua conta</div><h3>Trazer um personagem de outra sala</h3></div><span class="small muted">Vem com nível, habilidades, visual e itens. Tarefas e ouro começam do zero nesta sala.</span></div>
+      ? `<section class="card import-card"><div class="card-h"><div><div class="eyebrow">Da sua conta</div><h3>Trazer um herói de outra sala</h3></div><span class="small muted">Vem com nível, habilidades, visual e itens. Tarefas e ouro começam do zero nesta sala.</span></div>
           <div class="opts">${imp.map((r) => `<button class="opt" data-act="importHero" data-code="${esc(r.code)}" data-id="${esc(r.hero)}"><b>${esc(r.heroName || 'Herói')}</b> <span class="small muted">de ${esc(r.name || r.code)}</span></button>`).join('')}</div></section>`
-      : `<p class="small muted" style="margin-top:12px">O organizador desta sala não permite trazer personagens de outras salas. Crie um herói novo.</p>`) : '';
-    const sub = acct && !org && hs.some((h) => h.owner === myAcct()) ? ' Você já tem um personagem aqui.' : '';
-    return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Sala ${esc(S.room)}</div>${invited ? `<div class="invite-hi">Você foi convidado para <b>${esc((S.roomMeta && S.roomMeta.name) || 'a guilda')}</b>! ${full ? `A guilda já está cheia (${roomSlots()} heróis). Se um deles é seu, toque nele.` : 'Crie o seu herói ou traga um de outra sala.'}</div>` : ''}<h2>Quem está jogando?</h2><p class="muted">${acct ? `Escolha o seu personagem. Cada um é ligado a uma conta: só o dono e o organizador da sala jogam com ele.${sub}` : 'Escolha o seu personagem. Você só mexe nas tarefas, habilidades e itens dele.'}${S.party && !S.party.creatorId ? ' O primeiro herói criado vira o criador da sala.' : ''}</p></div>
+      : `<p class="small muted" style="margin-top:12px">O organizador desta sala não permite trazer heróis de outras salas. Crie um herói novo.</p>`) : '';
+    const sub = acct && !org && hs.some((h) => h.owner === myAcct()) ? ' Você já tem um herói aqui.' : '';
+    return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Sala ${esc(S.room)}</div>${invited ? `<div class="invite-hi">Você foi convidado para <b>${esc((S.roomMeta && S.roomMeta.name) || 'a guilda')}</b>! ${full ? `A guilda já está cheia (${roomSlots()} heróis). Se um deles é seu, toque nele.` : 'Crie o seu herói ou traga um de outra sala.'}</div>` : ''}<h2>Quem está jogando?</h2><p class="muted">${acct ? `Escolha o seu herói. Cada um é ligado a uma conta: só o dono e o organizador da sala jogam com ele.${sub}` : 'Escolha o seu herói. Você só mexe nas tarefas, habilidades e itens dele.'}${S.party && !S.party.creatorId ? ' O primeiro herói criado vira o organizador da sala.' : ''}</p></div>
       <div class="picklist">${cards}${canNew ? `<button class="pickme new" data-act="create"><div class="fig"><span class="plus">+</span></div><div class="nm">Criar herói</div><div class="cl">Vaga ${hs.length + 1} de ${roomSlots()}</div></button>` : ''}</div>
       ${impCard}
       <p class="small muted" style="margin-top:16px">${canInvite() ? `<button class="btn sm" data-act="invite">Convidar com link</button> ou passe o código <b>${esc(S.room)}</b>.` : `Passe o código <b>${esc(S.room)}</b> para o pessoal entrar na mesma sala.`}</p></section>`;
@@ -1048,12 +1117,10 @@
           <div class="kudos-act">${!mine && S.me && !S.readOnly ? `<button class="btn sm kudos-btn" data-act="askKudos" data-id="${h.id}" ${kudosLeft(h.id) ? '' : 'disabled'}>${kudosGivenTo(h.id) ? 'Elogiado hoje' : kudosLeftN() ? 'Elogiar' : 'Elogios de hoje usados'}</button>` : ''}</div></div></${mine ? 'button' : 'div'}>`);
       } else slots.push(`<div class="slot empty"><div class="fig"><span class="plus">+</span>Vaga livre</div><div class="cl">Vaga ${i + 1} de ${roomSlots()}</div></div>`);
     }
-    return `${bdayBanner()}${battleBanner()}
+    return `${bdayBanner()}${eventCard()}${battleBanner()}
+      <div class="section-t"><h3>A guilda</h3><span class="small muted">${kudosLeftN() ? `Você ainda pode dar ${kudosLeftN()} elogio${kudosLeftN() === 1 ? '' : 's'} hoje.` : 'Seus elogios de hoje já foram dados.'}</span></div>
       <section class="stage"><div class="lineup" style="--n:${roomSlots()}">${slots.join('')}</div></section>
-      ${S.me && S.heroes[S.me] ? `<section class="hero-cta"><div class="ic">${A.heroSvg(S.heroes[S.me], { noPet: true, noWeapon: true })}</div><div><b>Desenvolva ${esc(S.heroes[S.me].name)}</b><div class="small muted">Tarefas de hoje, habilidades, loja, conquistas e visual ficam na página do herói. Toque no seu herói acima ou use o botão.</div></div><div class="row" style="gap:6px"><button class="btn primary" data-act="open" data-id="${S.me}">Abrir meu herói${S.heroes[S.me].points ? ` <span class="dot">${S.heroes[S.me].points}</span>` : ''}</button></div></section>` : ''}
-      ${eventCard()}
-      ${boardCard()}
-      <div class="grid2">${lastBattleCard()}${rankingCard()}</div>
+      <div class="grid2">${rankingCard()}${lastBattleCard()}</div>
       ${mvpCard() ? `<div style="margin-top:18px">${mvpCard()}</div>` : ''}
       <div style="margin-top:18px">${activityCard()}</div>`;
   }
@@ -1132,9 +1199,9 @@
       + (who.length && !t.done ? `<span class="tag who">Para: ${who.map((id) => esc(S.heroes[id].name)).join(', ')}</span>` : '');
     return `<li class="task${t.done ? ' done' : ''}${x.carried ? ' carried' : ''}" style="--c:${d.color}">
       <button class="done-btn" data-act="${blocked ? 'noop' : 'doneBoard'}" data-id="${t.id}" aria-label="${t.done ? 'Cumprida' : 'Cumprir ' + esc(t.title)}" ${blocked ? 'disabled' : ''}${notMine && !t.done ? ` title="Missão de ${esc(who.map((id) => S.heroes[id].name).join(', '))}"` : ''}>${t.done ? '✓' : mine ? '½' : ''}</button>
-      <div><div class="t">${esc(t.title)}${boardFaces(t)}</div><div class="sub">${meta}</div></div>
+      <div class="tbody" data-act="rowOpen" data-id="${t.id}" role="button" tabindex="0" aria-expanded="${S.openRow === t.id}"><div class="t">${esc(t.title)}${boardFaces(t)}</div><div class="sub">${meta}</div></div>
       <div class="xp num">${xpTxt}</div>
-      <div class="tact">${canUndoBoard(t) ? `<button class="del undo" data-act="undoBoard" data-id="${t.id}" aria-label="Desfazer: ${esc(t.title)}" title="Desfazer (não fiz)">↺</button>` : canReopen(t) ? `<button class="del undo" data-act="reopenBoard" data-id="${t.id}" aria-label="Reabrir: ${esc(t.title)}" title="Reabrir (tira o XP de quem cumpriu)">↺</button>` : ''}${!t.done && !parts.length && canMake('tasks') ? `<button class="del" data-act="editTask" data-scope="board" data-id="${t.id}" aria-label="Editar missão" title="Editar">✎</button>` : ''}${canMake('tasks') ? `<button class="del" data-act="delBoard" data-id="${t.id}" aria-label="Apagar missão" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button>` : ''}</div></li>`;
+      ${S.openRow === t.id ? `<div class="row-acts">${canUndoBoard(t) ? `<button class="btn sm" data-act="undoBoard" data-id="${t.id}">↺ Desfazer (não fiz)</button>` : canReopen(t) ? `<button class="btn sm" data-act="reopenBoard" data-id="${t.id}">↺ Reabrir (tira o XP de quem cumpriu)</button>` : ''}${!t.done && !parts.length && canMake('tasks') ? `<button class="btn sm" data-act="editTask" data-scope="board" data-id="${t.id}">Editar</button>` : ''}${canMake('tasks') ? `<button class="btn sm ghost danger" data-act="delBoard" data-id="${t.id}" ${S.readOnly ? 'disabled' : ''}>Apagar</button>` : ''}${!(canUndoBoard(t) || canReopen(t) || canMake('tasks')) ? '<span class="small muted">Nada a fazer com esta missão.</span>' : ''}</div>` : ''}</li>`;
   }
   function boardFilterBar() {
     const hs = heroList(); if (hs.length < 2) return '';
@@ -1172,7 +1239,8 @@
     const hpos = [[30, 80, 1], [20, 94, 1.05], [19, 64, 0.9], [9, 86, 1], [8, 66, 0.9]];
     const hsSorted = hs.slice().sort((a, c) => ((D.CLASSES[c.cls] || {}).aggro || 1) - ((D.CLASSES[a.cls] || {}).aggro || 1)).slice(0, 5);
     const foesSorted = foes.slice().sort((a, c) => (c.boss ? 1 : 0) - (a.boss ? 1 : 0));
-    return `<section class="nightfight">
+    const nowD = new Date(); const left = 24 - (nowD.getHours() + nowD.getMinutes() / 60); const night = Math.max(0, Math.min(1, 1 - left / 12)).toFixed(2);
+    return `<section class="nightfight" style="--night:${night}">
       <div class="nf-scene">${A.sceneSvg(ri)}
         ${hsSorted.map((h, i) => { const [x, y, sc] = hpos[i]; return `<div class="nf-u hero" style="left:${x}%;top:${y}%;--s:${sc};z-index:${y}"><div class="bob">${A.heroSvg(h, { noPet: true })}</div></div>`; }).join('')}
         ${foesSorted.map((f, i) => { const [x, y, sc] = fpos[i]; return `<div class="nf-u foe" style="left:${x}%;top:${y}%;--s:${sc * (f.boss ? 1.4 : f.count > 1 ? 1.2 : 1)};z-index:${y}"><div class="bob">${A.enemyArt(f)}</div></div>`; }).join('')}
@@ -1288,20 +1356,91 @@
   function heroView(h) {
     const c = D.CLASSES[h.cls];
     const need = D.xpToNext(h.level);
-    const tabs = [['tarefas', 'Tarefas'], ['recompensas', 'Recompensas'], ['habilidades', 'Habilidades'], ['loja', 'Loja'], ['conquistas', 'Conquistas'], ['visual', 'Visual']];
+    // três abas: Evoluir (habilidades), Equipar (loja e visual) e Conquistas
+    if (!['habilidades', 'loja', 'visual', 'conquistas'].includes(S.tab)) S.tab = 'habilidades';
+    const tabs = [['habilidades', 'Evoluir'], ['equipar', 'Equipar'], ['conquistas', 'Conquistas']];
+    const curTab = ['loja', 'visual'].includes(S.tab) ? 'equipar' : S.tab;
     let body = '';
-    if (S.tab === 'tarefas') body = tasksTab(h);
-    else if (S.tab === 'habilidades') body = skillsTab(h);
-    else if (S.tab === 'loja') body = shopTab(h);
-    else if (S.tab === 'recompensas') body = rewardsTab(h);
-    else if (S.tab === 'conquistas') body = achTab(h);
-    else body = visualTab(h);
+    if (S.tab === 'habilidades') body = skillsTab(h);
+    else if (S.tab === 'conquistas') body = conquestTab(h);
+    else body = `<div class="seg subseg" role="group" aria-label="Equipar"><button data-act="tab" data-v="loja" aria-pressed="${S.tab === 'loja'}">Loja</button><button data-act="tab" data-v="visual" aria-pressed="${S.tab === 'visual'}">Visual</button></div>` + (S.tab === 'loja' ? shopTab(h) : visualTab(h));
     return `<section class="hero-head"><div class="fig"><div class="idle">${A.heroSvg(h)}</div>${kudosStrip(h.id)}</div><div>
       <div class="eyebrow" style="color:${c.color}">${ancOf(h).name} · ${c.name} · ${c.role}</div><h2>${esc(h.name)}</h2>
       <div class="meta"><span class="chip">Nível <b class="num">${h.level}</b></span><span class="chip"><span class="coin"></span> <b class="num">${goldOf(h)}</b> ouro</span>${h.potion && h.potion.day === today() ? `<span class="chip warn">${esc((D.POTIONS.find((x) => x.id === h.potion.id) || {}).name || 'Poção')} esta noite</span>` : ''}${festaOf(h) ? `<span class="chip festa-chip"><span class="coin festa"></span> <b class="num">${festaOf(h)}</b> de festa</span>` : ''}<span class="chip"><span class="gem"></span> <b class="num">${redeemBal(h)}</b> XP de resgate</span>${streakNow(h) ? `<span class="chip streakchip"><b class="num">${streakNow(h)}</b> dia${streakNow(h) > 1 ? 's' : ''} seguido${streakNow(h) > 1 ? 's' : ''}</span>` : ''}${h.points ? `<span class="chip warn"><b class="num">${h.points}</b> ponto${h.points > 1 ? 's' : ''} de habilidade</span>` : ''}<span class="chip">Poder de combate <b class="num">${E.powerScore(E.heroStats(Object.assign({}, h, { bday: bdayBuffOn(h), potion: h.potion && h.potion.day === today() ? h.potion.id : null })))}</b></span></div>
-      ${kudosSummary(h)}
       <div class="xpline"><span>Experiência</span><span class="num"><b>${h.xp}</b> / ${need} para o nível ${h.level + 1}${h.xpDebt ? ` <span class="muted" title="XP de tarefas desfeitas depois que o nível já tinha subido. As próximas tarefas pagam primeiro.">· −${h.xpDebt} a repor</span>` : ''}</span></div><div class="bar"><i style="width:${Math.round((h.xp / need) * 100)}%"></i></div></div></section>
-      <nav class="tabs" role="tablist">${tabs.map(([k, n]) => `<button role="tab" aria-selected="${S.tab === k}" data-act="tab" data-v="${k}">${n}${k === 'habilidades' && h.points ? `<span class="dot">${h.points}</span>` : ''}${k === 'recompensas' && rewardList().some((r) => r.cost <= redeemBal(h)) ? '<span class="dot">!</span>' : ''}</button>`).join('')}</nav>${body}`;
+      <nav class="tabs" role="tablist">${tabs.map(([k, n]) => `<button role="tab" aria-selected="${curTab === k}" data-act="tab" data-v="${k === 'equipar' ? (S.tab === 'visual' ? 'visual' : 'loja') : k}">${n}${k === 'habilidades' && h.points ? `<span class="dot">${h.points}</span>` : ''}</button>`).join('')}</nav>${body}`;
+  }
+  /* ----- Hoje: tudo o que dá para fazer no dia, numa lista só ----- */
+  function todayView(h) {
+    ensureHero(h);
+    const t = today(); const tasks = h.tasks || [];
+    const vis = tasks.filter(visibleToday);
+    const open = vis.filter((x) => !x.done && !x.pending);
+    const chores = open.filter((x) => x.chore);
+    const mine = open.filter((x) => !x.chore).sort((a, b) => (dueDay(a) < t ? 0 : 1) - (dueDay(b) < t ? 0 : 1));
+    const pend = vis.filter((x) => x.pending);
+    const done = tasks.filter((x) => x.done === t);
+    const later = tasks.filter((x) => !visibleToday(x) && !x.done);
+    const ball = boardList().filter(boardFilterOk);
+    const bOpen = ball.filter((x) => !x.done && !boardFuture(x)); const bDone = boardList().filter((x) => x.done === t || ((x.parts || []).includes(h.id) && !x.done)); const bLater = ball.filter(boardFuture);
+    const lg = (h.log || {})[t] || {}; const xpToday = lg.tx != null ? lg.tx : lg.x || 0; const cap = xpCap();
+    const sn = streakNow(h); const L = dayLeaders(heroList(), t); const ch = chestState(h);
+    const total = open.length + done.length + pend.length;
+    const can = canMake('tasks', h.id) && !S.readOnly;
+    const sec = (title, sub, list, cls) => list.length ? `<div class="section-t${cls ? ' ' + cls : ''}"><h3>${title}</h3>${sub ? `<span class="small muted">${sub}</span>` : ''}</div><ul class="tasks">${list.join('')}</ul>` : '';
+    return `<div class="today">
+      ${bdayCta(h)}
+      <section class="daystrip" aria-label="Seu dia">
+        <div class="ds${cap && xpToday >= cap ? ' full' : ''}"><span class="l">XP hoje</span><b class="num">${xpToday}${cap ? `<small> / ${cap}</small>` : ''}</b>${cap ? `<i class="dsbar"><i style="width:${Math.min(100, Math.round((xpToday / cap) * 100))}%"></i></i>` : ''}</div>
+        <div class="ds"><span class="l">Feitas</span><b class="num">${done.length}<small> / ${total}</small></b></div>
+        <div class="ds"><span class="l">Sequência</span><b class="num">${sn}<small> dia${sn === 1 ? '' : 's'}</small></b></div>
+        <div class="ds"><span class="l">Destaque</span><b>${L ? esc(L.heroes.map((x) => x.name).join(' e ')) : '<span class="muted">ninguém ainda</span>'}</b></div>
+      </section>
+      ${ch.ready ? `<section class="chest-cta"><div class="chest-ic">${chestSvg(false)}</div><div><b>Baú do dia liberado!</b><div class="small">Você cumpriu todas as tarefas de hoje.</div></div><button class="btn primary" data-act="openChest">Abrir baú</button></section>` : ''}
+      ${can ? `<form class="quickadd addtask" data-form="task">
+        <div class="qa-row"><input type="text" id="task-title" value="${esc((S.inputs || {})['task-title'] || '')}" maxlength="80" placeholder="O que você vai fazer?" autocomplete="off" aria-label="Nova tarefa"><button class="btn primary" type="submit">Adicionar</button></div>
+        <div class="qa-row"><div class="seg" role="group" aria-label="Dificuldade">${diffButtons()}</div><button type="button" class="linkbtn" data-act="moreOpts" aria-expanded="${!!S.moreOpts}">${S.moreOpts ? 'Menos opções' : 'Mais opções'}</button></div>
+        <div class="qa-more${S.moreOpts ? '' : ' hidden'}">
+          <div class="row"><div class="seg" role="group" aria-label="Para quem"><button type="button" data-act="target" data-v="me" aria-pressed="${S.newTarget !== 'guild'}">Para mim</button><button type="button" data-act="target" data-v="guild" aria-pressed="${S.newTarget === 'guild'}">Para a guilda</button></div>
+            ${S.newTarget === 'guild' ? `<label class="check"><input type="checkbox" id="task-duo" ${S.newDuo ? 'checked' : ''}> Em dupla</label>` : ''}</div>
+          ${S.newTarget === 'guild' ? whoPicker(S.boardWho || [], 'boardWho') : ''}
+          ${freqControls(newFreqState(), 'new')}
+          <div class="row"><label class="check" for="task-due">Até que horas? <input type="time" id="task-due" class="time-in" value="${esc(S.newDue)}"></label></div>
+        </div></form>` : `<div class="perm-note small muted">Nesta sala, ${permNote('tasks')} criam tarefas. As obrigatórias e as missões da guilda aparecem aqui.</div>`}
+      ${sec('Obrigatórias', 'definidas pelo organizador', chores.map(taskRow))}
+      ${sec('Minhas tarefas', `${D.WEEKDAYS[dowOf(t)]}, ${fmtDay(t)}`, mine.map(taskRow))}
+      ${!chores.length && !mine.length ? `<div class="empty-note">${tasks.length ? 'Tudo feito por hoje. A guilda agradece!' : 'Nenhuma tarefa ainda. Escreva acima o que você vai fazer hoje.'}</div>` : ''}
+      <div class="section-t"><h3>Missões da guilda</h3><span class="small muted">Quem cumprir primeiro leva a experiência.</span></div>
+      ${boardFilterBar()}
+      ${bOpen.length ? `<ul class="tasks">${bOpen.map((x) => boardRow(x)).join('')}</ul>` : `<div class="empty-note">${S.boardFilter && S.heroes[S.boardFilter] ? `Nenhuma missão para ${esc(S.heroes[S.boardFilter].name)} hoje.` : 'Nenhuma missão no quadro hoje.'}${can ? ' Em "Mais opções", escolha "Para a guilda" para criar uma.' : ''}</div>`}
+      ${sec('Aguardando aprovação', 'O XP entra quando um organizador aprovar.', pend.map(taskRow))}
+      ${done.length || bDone.length ? `<details class="later" ${S.showDone ? 'open' : ''}><summary data-act="toggleDone">Feitas hoje (${done.length + bDone.length}) <span class="num muted">· +${xpToday} XP</span></summary><ul class="tasks">${done.map(taskRow).join('')}${bDone.map((x) => boardRow(x)).join('')}</ul></details>` : ''}
+      ${later.length || bLater.length ? `<details class="later" ${S.showLater ? 'open' : ''}><summary data-act="toggleLater">Agendadas (${later.length + bLater.length})</summary><ul class="tasks">${later.map(taskRow).join('')}${bLater.map((x) => boardRow(x)).join('')}</ul></details>` : ''}
+      <details class="later howto" ${S.showHow ? 'open' : ''}><summary data-act="toggleHow">Como o XP funciona</summary>
+        <ul class="small" style="padding-left:18px;margin:8px 0 0;display:grid;gap:6px">
+          <li><b>Muito fácil</b> 10 XP · <b>Fácil</b> 20 · <b>Médio</b> 35 · <b>Difícil</b> 60.</li>
+          <li>Tarefa que fica para o dia seguinte vira <b>acumulada</b> e rende ${Math.round(D.CARRY_BONUS * 100)}% a mais.</li>
+          <li>Com horário, feita até a hora rende <b>+${Math.round(D.PUNCTUAL_BONUS * 100)}%</b>. Cada dia seguido de sequência dá +2% (até +20%).</li>
+          <li>Em dupla, cada um dos dois ganha ${Math.round(D.DUO_SHARE * 100)}% do XP. Terminando todas as tarefas do dia, abre o <b>baú diário</b>.</li>
+          <li>Cada nível dá 1 ponto de habilidade. O nível ${h.level + 1} pede ${D.xpToNext(h.level)} XP.</li>
+        </ul></details>
+    </div>`;
+  }
+  /* ----- Prêmios: XP vira prêmio de verdade ----- */
+  function prizesView(h) {
+    return `<div class="view-h"><div class="eyebrow">Prêmios</div><h2>XP vira prêmio de verdade</h2><p class="small muted" style="margin:4px 0 0">Ouro compra itens no jogo, na aba Herói. XP é trocado aqui por prêmios combinados com o organizador.</p></div>${rewardsTab(h)}${canMake('rewards', h.id) && !S.readOnly ? `<section class="card" style="margin-top:18px">${rewardsAdmin(false, !isCreator())}</section>` : ''}`;
+  }
+  /* ----- Conquistas: medalhas, elogios, sequência e números ----- */
+  function conquestTab(h) {
+    const sn = streakNow(h);
+    return `<div class="grid2"><div>
+      <section class="card"><div class="eyebrow">Elogios</div>${kudosSummary(h)}</section>
+      <section class="card"><div class="eyebrow">Sequência</div><div class="streak-big"><span class="num">${sn}</span> dia${sn === 1 ? '' : 's'} seguido${sn === 1 ? '' : 's'}</div>
+        <p class="small muted" style="margin:4px 0 0">${sn ? `Bônus de sequência hoje: +${Math.round(streakBonusNext(h) * 100)}% de XP. Cumpra ao menos uma tarefa por dia para manter.` : 'Cumpra uma tarefa hoje para começar uma sequência.'}</p>
+        ${h.streak && h.streak.best ? `<p class="small" style="margin:6px 0 0">Recorde: <b>${h.streak.best}</b> dias</p>` : ''}</section>
+      <section class="card"><div class="eyebrow">Números de ${esc(h.name)}</div><div class="stats" style="margin-top:10px"><div class="stat"><div class="v num">${h.stats.done || 0}</div><div class="l">Tarefas feitas</div></div><div class="stat"><div class="v num">${h.stats.xp || 0}</div><div class="l">XP total</div></div><div class="stat"><div class="v num">${h.stats.board || 0}</div><div class="l">Missões da guilda</div></div><div class="stat"><div class="v num">${h.stats.kudosGot || 0}</div><div class="l">Elogios</div></div></div>
+        ${S.readOnly ? '' : `<button class="btn danger sm" style="margin-top:14px" data-act="askRetire">Aposentar herói</button>`}</section>
+    </div><div>${achTab(h)}</div></div>`;
   }
   const daysTxt = (days) => days && days.length && days.length < 7 ? days.slice().sort().map((d) => D.WEEKDAYS[d]).join(', ') : '';
   function taskMeta(t, x) {
@@ -1328,9 +1467,9 @@
     const xpTxt = t.done ? `+${t.gain != null ? t.gain : x.base} XP` : t.pending ? `${t.pendXp} XP` : capShow(x.total) || (x.total !== x.base ? `<s>${x.base}</s>+${x.total} XP` : `+${x.total} XP`);
     return `<li class="task${t.done ? ' done' : ''}${t.pending ? ' pending' : ''}${x.carried ? ' carried' : ''}" style="--c:${d.color}">
       <button class="done-btn" data-act="${t.done || t.pending ? 'noop' : 'done'}" data-id="${t.id}" aria-label="${t.done ? 'Concluída' : 'Concluir ' + esc(t.title)}" ${S.readOnly || t.done || t.pending ? 'disabled' : ''}>${t.done ? '✓' : t.pending ? '…' : ''}</button>
-      <div><div class="t">${esc(t.title)}</div><div class="sub">${taskMeta(t, x)}</div></div>
+      <div class="tbody" data-act="rowOpen" data-id="${t.id}" role="button" tabindex="0" aria-expanded="${S.openRow === t.id}"><div class="t">${esc(t.title)}</div><div class="sub">${taskMeta(t, x)}</div></div>
       <div class="xp num">${xpTxt}</div>
-      <div class="tact">${(t.done === today() || t.pending) && !S.readOnly ? `<button class="del undo" data-act="undoTask" data-id="${t.id}" aria-label="Desfazer: ${esc(t.title)}" title="Desfazer (não fiz)">↺</button>` : ''}${!t.chore && !t.done && !t.pending && canMake('tasks') ? `<button class="del" data-act="editTask" data-scope="me" data-id="${t.id}" aria-label="Editar tarefa" title="Editar">✎</button>` : ''}${t.chore || !canMake('tasks') ? '' : `<button class="del" data-act="delTask" data-id="${t.id}" aria-label="Apagar tarefa" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button>`}</div></li>`;
+      ${S.openRow === t.id ? `<div class="row-acts">${(t.done === today() || t.pending) && !S.readOnly ? `<button class="btn sm" data-act="undoTask" data-id="${t.id}">↺ Desfazer (não fiz)</button>` : ''}${!t.chore && !t.done && !t.pending && canMake('tasks') ? `<button class="btn sm" data-act="editTask" data-scope="me" data-id="${t.id}">Editar</button>` : ''}${t.chore || !canMake('tasks') ? '' : `<button class="btn sm ghost danger" data-act="delTask" data-id="${t.id}" ${S.readOnly ? 'disabled' : ''}>Apagar</button>`}${t.chore && !(t.done === today() || t.pending) ? '<span class="small muted">Tarefa obrigatória: só o organizador muda.</span>' : ''}</div>` : ''}</li>`;
   }
   function dayChips(sel, act) { return `<div class="days" role="group" aria-label="Dias da semana">${D.WEEKDAYS.map((n, i) => `<button type="button" class="dchip" data-act="${act || 'day'}" data-v="${i}" aria-pressed="${(sel || []).includes(i)}">${n}</button>`).join('')}</div>`; }
   function tasksTab(h) {
@@ -1361,7 +1500,7 @@
       ${carried.length ? `<div class="section-t"><h3>Acumuladas</h3><span class="small muted">Valem +${Math.round(D.CARRY_BONUS * 100)}% de XP, mas o grupo luta sem essa força esta noite.</span></div><ul class="tasks">${carried.map(taskRow).join('')}</ul>` : ''}
       <div class="section-t"><h3>Para hoje</h3><span class="small muted">${D.WEEKDAYS[dowOf(t)]}, ${fmtDay(t)}</span></div>
       ${fresh.length ? `<ul class="tasks">${fresh.map(taskRow).join('')}</ul>` : `<div class="empty-note">${tasks.length ? 'Tudo feito por hoje. O grupo agradece!' : 'Nenhuma tarefa ainda. Liste o que você quer cumprir hoje.'}</div>`}
-      ${pend.length ? `<div class="section-t"><h3>Aguardando aprovação</h3><span class="small muted">O XP entra quando um criador aprovar.</span></div><ul class="tasks">${pend.map(taskRow).join('')}</ul>` : ''}
+      ${pend.length ? `<div class="section-t"><h3>Aguardando aprovação</h3><span class="small muted">O XP entra quando um organizador aprovar.</span></div><ul class="tasks">${pend.map(taskRow).join('')}</ul>` : ''}
       ${bo.length ? `<div class="section-t"><h3>Quadro da guilda</h3><span class="small muted">Qualquer herói pode cumprir.</span></div><ul class="tasks">${bo.filter((x) => !x.done).concat(bo.filter((x) => x.done)).map((x) => boardRow(x, true)).join('')}</ul>` : ''}
       ${done.length ? `<div class="section-t"><h3>Feitas hoje</h3><span class="small muted num">+${xpToday} XP</span></div><ul class="tasks">${done.map(taskRow).join('')}</ul>` : ''}
       ${later.length ? `<details class="later" ${S.showLater ? 'open' : ''}><summary data-act="toggleLater">Outros dias (${later.length})</summary><ul class="tasks">${later.map(taskRow).join('')}</ul></details>` : ''}
@@ -1460,31 +1599,31 @@
     const bal = redeemBal(h); const list = rewardList(); const mine = requestList().filter((q) => q.heroId === h.id).slice(0, 15);
     const next = list.find((r) => r.cost > bal && !rewardBlock(r, h));
     const st = { pending: ['Aguardando aprovação', 'wait'], approved: ['Aprovado · aguardando entrega', 'ontime'], delivered: ['Entregue', 'win'], refused: ['Recusado', 'late'] };
-    return `<div class="grid2"><div class="card"><div class="card-h"><div><div class="eyebrow">Recompensas da vida real</div><h3>O que dá para pedir</h3></div><span class="chip"><span class="gem"></span> <b class="num">${bal}</b> XP de resgate</span></div>
-      <p class="small muted" style="margin-top:0">Todo XP ganho entra neste saldo. O pedido vai para os criadores aprovarem e entregarem; o nível do herói não muda.${next ? ` Faltam <b>${next.cost - bal} XP</b> para "${esc(next.name)}".` : ''}</p>
+    return `<div class="grid2"><div class="card"><div class="card-h"><div><div class="eyebrow">Prêmios da vida real</div><h3>O que dá para pedir</h3></div><span class="chip"><span class="gem"></span> <b class="num">${bal}</b> XP de resgate</span></div>
+      <p class="small muted" style="margin-top:0">Todo XP ganho entra neste saldo. O pedido vai para os organizadores aprovarem e entregarem; o nível do herói não muda.${next ? ` Faltam <b>${next.cost - bal} XP</b> para "${esc(next.name)}".` : ''}</p>
       ${list.length ? `<ul class="rewards">${list.map((r) => { const blk = rewardBlock(r, h); const ok = bal >= r.cost && !blk; const pct = Math.min(100, Math.round((bal / r.cost) * 100));
         const lim = [r.perWeek ? `${r.perWeek}x por semana` : '', r.stock != null ? `${r.stock} em estoque` : ''].filter(Boolean).join(' · ');
         return `<li class="reward${ok ? ' ready' : ''}"><div><div class="t">${esc(r.name)}</div>${lim ? `<div class="small muted">${lim}</div>` : ''}<div class="bar" style="margin-top:6px"><i style="width:${pct}%"></i></div></div><div class="xp num">${r.cost} XP</div>
           <button class="btn sm ${ok ? 'primary' : ''}" data-act="askRedeem" data-id="${r.id}" ${ok && !S.readOnly ? '' : 'disabled'}>${blk || 'Pedir'}</button></li>`; }).join('')}</ul>`
-      : `<div class="empty-note">Ainda não há recompensas cadastradas.${canMake('rewards', h.id) ? ' Cadastre a primeira abaixo.' : ' Os organizadores da sala cadastram.'}</div>`}
-      ${canMake('rewards', h.id) && !isCreator(h.id) ? `<div style="margin-top:14px">${rewardsAdmin(false, true)}</div>` : ''}</div>
+      : `<div class="empty-note">Ainda não há prêmios cadastrados.${canMake('rewards', h.id) ? ' Cadastre a primeira abaixo.' : ' Os organizadores da sala cadastram.'}</div>`}
+</div>
       <div class="card"><div class="eyebrow">Pedidos de ${esc(h.name)}</div>
       ${mine.length ? `<ul class="hist" style="margin-top:10px">${mine.map((q) => `<li><span>${fmtDay(q.day)} · ${esc(q.name)} <span class="small muted">· ${q.cost} XP</span></span><span class="tag ${st[q.status][1]}">${st[q.status][0]}</span></li>`).join('')}</ul>` : '<p class="muted small">Nenhum pedido ainda.</p>'}
       <div class="stats" style="margin-top:12px"><div class="stat"><div class="v num">${(h.stats && h.stats.xp) || 0}</div><div class="l">XP ganho no total</div></div><div class="stat"><div class="v num">${h.redeemed || 0}</div><div class="l">XP usado em pedidos</div></div></div></div></div>`;
   }
   function rewardsAdmin(locked, mineOnly) {
     const list = mineOnly ? rewardList().filter((r) => r.by === S.me) : rewardList();
-    return `<div class="field" style="margin:0"><h3 style="margin-bottom:10px">${mineOnly ? 'Cadastrar recompensa' : 'Recompensas da vida real'}</h3>
+    return `<div class="field" style="margin:0"><h3 style="margin-bottom:10px">${mineOnly ? 'Cadastrar prêmio' : 'Prêmios da vida real'}</h3>
       <form class="row" data-form="reward"><input type="text" id="rw-name" value="${esc((S.inputs || {})["rw-name"] || "")}" maxlength="60" placeholder="Ex.: Passeio no parquinho" autocomplete="off" class="txt" style="flex:1 1 100%" ${locked || S.readOnly ? 'disabled' : ''}>
         <label class="sr" for="rw-week">Limite por semana</label><input type="number" id="rw-week" min="1" max="50" step="1" placeholder="Por semana (opcional)" class="txt" style="flex:1;min-width:140px" ${locked || S.readOnly ? 'disabled' : ''}>
         <label class="sr" for="rw-stock">Estoque</label><input type="number" id="rw-stock" min="0" max="999" step="1" placeholder="Estoque (opcional)" class="txt" style="flex:1;min-width:130px" ${locked || S.readOnly ? 'disabled' : ''}>
         <label class="sr" for="rw-cost">Custo em XP</label><input type="number" id="rw-cost" value="${esc((S.inputs || {})["rw-cost"] || "")}" min="1" max="100000" step="1" placeholder="Custo em XP" class="txt" style="flex:1;min-width:120px" ${locked || S.readOnly ? 'disabled' : ''}>
         <button class="btn primary sm" type="submit" ${locked || S.readOnly ? 'disabled' : ''}>Cadastrar</button></form>
-      ${list.length ? `<ul class="hist" style="margin-top:10px">${list.map((r) => `<li><span>${esc(r.name)}${r.perWeek || r.stock != null ? `<span class="small muted"> · ${[r.perWeek ? r.perWeek + 'x/semana' : '', r.stock != null ? r.stock + ' em estoque' : ''].filter(Boolean).join(' · ')}</span>` : ''}</span><span class="row" style="gap:8px"><span class="tag num">${r.cost} XP</span><button class="btn sm ghost" data-act="delReward" data-id="${r.id}" aria-label="Remover ${esc(r.name)}" ${locked || S.readOnly ? 'disabled' : ''}>Remover</button></span></li>`).join('')}</ul>` : '<p class="small muted" style="margin:8px 0 0">Nenhuma recompensa cadastrada.</p>'}</div>`;
+      ${list.length ? `<ul class="hist" style="margin-top:10px">${list.map((r) => `<li><span>${esc(r.name)}${r.perWeek || r.stock != null ? `<span class="small muted"> · ${[r.perWeek ? r.perWeek + 'x/semana' : '', r.stock != null ? r.stock + ' em estoque' : ''].filter(Boolean).join(' · ')}</span>` : ''}</span><span class="row" style="gap:8px"><span class="tag num">${r.cost} XP</span><button class="btn sm ghost" data-act="delReward" data-id="${r.id}" aria-label="Remover ${esc(r.name)}" ${locked || S.readOnly ? 'disabled' : ''}>Remover</button></span></li>`).join('')}</ul>` : '<p class="small muted" style="margin:8px 0 0">Nenhum prêmio cadastrado.</p>'}</div>`;
   }
   /* ----- Relatório semanal (para os criadores) ----- */
   function reportView() {
-    if (!isCreator()) return '<div class="card"><h3>O relatório é para os criadores da sala.</h3></div>';
+    if (!isCreator()) return '<div class="card"><h3>O relatório é para os organizadores da sala.</h3></div>';
     const t = today(); const days = Array.from({ length: 7 }, (_, i) => addDays(t, i - 6)); const prev = Array.from({ length: 7 }, (_, i) => addDays(t, i - 13));
     const sum = (h, ds, k) => ds.reduce((a, d) => a + ((h.log && h.log[d] && h.log[d][k]) || 0), 0);
     const hs = heroList();
@@ -1518,15 +1657,15 @@
   }
   /* ----- Configurações do criador da sala ----- */
   function settingsView() {
-    if (!isCreator()) return `<div class="card"><h3>Só os criadores da sala mexem aqui</h3><p class="muted">As configurações ficam com quem criou a sala e com os co-criadores que essa pessoa escolher.</p></div>`;
+    if (!isCreator()) return `<div class="card"><h3>Só os organizadores da sala mexem aqui</h3><p class="muted">As configurações ficam com quem criou a sala e com os co-organizadores que essa pessoa escolher.</p></div>`;
     const p = S.party || {};
-    if (p.pin && !S.masterOk) return `<section class="gate"><form class="card" data-form="pinGate" style="max-width:420px;margin:0 auto"><div class="eyebrow">Configurações protegidas</div><h3>Digite o PIN do criador</h3>
+    if (p.pin && !S.masterOk) return `<section class="gate"><form class="card" data-form="pinGate" style="max-width:420px;margin:0 auto"><div class="eyebrow">Configurações protegidas</div><h3>Digite o PIN do organizador</h3>
       <div class="field" style="margin-top:12px"><label for="pin-in">PIN</label><input type="password" id="pin-in" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" class="pin-in"></div>
       ${S.pinErr ? `<p class="small" style="color:var(--bad);margin-top:-8px">${esc(S.pinErr)}</p>` : ''}<button class="btn primary" type="submit">Destravar</button></form></section>`;
     const mul = S.diffPreview != null ? S.diffPreview : mulOf(p); const lv = levelFor(mul);
     const hs = heroList();
     const assignTxt = (c) => c.assign === 'all' ? 'Todos os heróis' : (c.assign || []).map((id) => (S.heroes[id] ? S.heroes[id].name : '')).filter(Boolean).join(', ') || 'Ninguém';
-    return `<div class="row" style="align-items:flex-end"><div><div class="eyebrow">Sala ${esc(S.room)}</div><h2 style="margin:4px 0 16px">Configurações da guilda</h2></div><span class="spacer"></span><button class="btn" data-act="report" style="margin-bottom:16px">Relatório semanal</button></div>
+    return `<span data-sala-root hidden></span><div class="row" data-sala-head style="align-items:flex-end"><div><div class="eyebrow">Sala ${esc(S.room)}</div><h2 style="margin:4px 0 16px">Sala da guilda</h2></div><span class="spacer"></span><button class="btn" data-act="report" style="margin-bottom:16px">Relatório semanal</button></div>
       <div class="grid2"><div>
       <section class="card"><div class="card-h"><h3>Dificuldade</h3><span class="chip"><b id="diff-name">${lv.name}</b> · <span id="diff-pct" class="num">${Math.round(mul * 100)}%</span></span></div>
         <input type="range" id="diff-range" class="range" min="0.6" max="1.8" step="0.05" value="${mul}" aria-label="Dificuldade das batalhas">
@@ -1537,8 +1676,8 @@
       ${permSection(hs)}
       <section class="card"><div class="card-h"><h3>Experiência por dia</h3>${xpCap() ? `<span class="chip">Limite: <b class="num">${xpCap()} XP</b></span>` : '<span class="chip">Sem limite</span>'}</div>
         <form data-form="xpcfg" class="xpcfg">
-          <div class="field"><label for="cap-in">Limite diário de XP por personagem</label><div class="row"><input type="number" id="cap-in" class="time-in num-in wide" min="0" max="5000" step="10" placeholder="Sem limite" value="${xpCap() || ''}"><span class="small muted">XP das tarefas. Deixe vazio ou 0 para não ter limite.</span></div></div>
-          <p class="small muted" style="margin:-4px 0 10px">Depois do limite, o personagem continua cumprindo tarefas, mas não ganha mais experiência naquele dia. Elogios, baús e prêmios de evento não contam no limite.</p>
+          <div class="field"><label for="cap-in">Limite diário de XP por herói</label><div class="row"><input type="number" id="cap-in" class="time-in num-in wide" min="0" max="5000" step="10" placeholder="Sem limite" value="${xpCap() || ''}"><span class="small muted">XP das tarefas. Deixe vazio ou 0 para não ter limite.</span></div></div>
+          <p class="small muted" style="margin:-4px 0 10px">Depois do limite, o herói continua cumprindo tarefas, mas não ganha mais experiência naquele dia. Elogios, baús e prêmios de evento não contam no limite.</p>
           <div class="field"><label for="mvp-in">Bônus do destaque do dia (moedas)</label><div class="row"><input type="number" id="mvp-in" class="time-in num-in wide" min="0" max="5000" step="5" placeholder="Automático" value="${Math.round(Number(p.mvpGold) || 0) || ''}"><span class="small muted">Vazio = automático (no estágio atual: ${mvpGoldFor(stage(), {})} moedas, metade do prêmio da vitória).</span></div></div>
           <p class="small muted" style="margin:-4px 0 10px">Quem somar mais XP em tarefas no dia ganha esse bônus à meia-noite, vencendo ou perdendo a batalha. Conta o XP que as tarefas valem, mesmo acima do limite. Empate: todos ganham.</p>
           <button class="btn primary" type="submit">Salvar</button></form></section>
@@ -1561,45 +1700,75 @@
         <p class="small muted" style="margin:8px 0 0">A prévia mostra como a batalha desta noite terminaria se fosse agora. Não dá recompensa nem muda o estágio.</p></section>
       ${requestsAdmin()}
       <section class="card">${rewardsAdmin(false)}</section>
-      <section class="card"><div class="card-h"><h3>Co-criadores</h3><span class="small muted">Também abrem estas configurações.</span></div>
+      <section class="card"><div class="card-h"><h3>Co-organizadores</h3><span class="small muted">Também abrem estas configurações.</span></div>
         ${(() => { const others = hs.filter((h) => h.id !== p.creatorId); const main = S.heroes[p.creatorId];
           return `<p class="small" style="margin:0 0 10px">${main ? `${roleTag(main)} <b>${esc(main.name)}</b>` : ''}</p>${others.length ? `<div class="co-list">${others.map((h) => { const on = isCoCreator(h.id); return `<label class="co-item${on ? ' on' : ''}"><input type="checkbox" data-act="toggleCo" value="${h.id}" ${on ? 'checked' : ''} ${isMainCreator() ? '' : 'disabled'}><span class="ic">${A.heroSvg(h, { noPet: true, noWeapon: true })}</span><span><b>${esc(h.name)}</b><br><span class="small muted">${D.CLASSES[h.cls].name}</span></span></label>`; }).join('')}</div>` : '<p class="small muted" style="margin:0">Quando outras pessoas criarem seus heróis na sala, elas aparecem aqui.</p>'}
-          ${isMainCreator() ? '' : '<p class="small muted" style="margin:10px 0 0">Só quem criou a sala escolhe os co-criadores.</p>'}`; })()}</section>
-      ${Store.server ? `<section class="card"><div class="card-h"><h3>Personagens importados</h3></div>
-        <label class="check"><input type="checkbox" data-act="toggleImport" ${p.allowImport ? 'checked' : ''}> Permitir que tragam personagens de outras salas</label>
+          ${isMainCreator() ? '' : '<p class="small muted" style="margin:10px 0 0">Só quem criou a sala escolhe os co-organizadores.</p>'}`; })()}</section>
+      ${Store.server ? `<section class="card"><div class="card-h"><h3>Heróis importados</h3></div>
+        <label class="check"><input type="checkbox" data-act="toggleImport" ${p.allowImport ? 'checked' : ''}> Permitir que tragam heróis de outras salas</label>
         <p class="small muted" style="margin:6px 0 0">Quem tem conta pode trazer um herói que já tem em outra sala, com nível, habilidades e itens. Tarefas e ouro começam do zero aqui. ${p.allowImport ? '' : 'Desligado: todo mundo começa no nível 1.'}</p></section>` : ''}
       ${(() => { const t = today(); const rows = [];
-        for (const h of hs) for (const x of h.tasks || []) if (x.done === t || x.pending) rows.push(`<li><span><b>${esc(h.name)}</b> · ${esc(x.title)}<br><span class="small muted">${x.pending ? 'aguardando aprovação' : `+${x.gain || 0} XP`}</span></span><button class="btn sm ghost" data-act="reopenTask" data-hero="${h.id}" data-id="${x.id}">Reabrir</button></li>`);
-        for (const b of boardList()) if (b.done === t || (b.parts || []).length) rows.push(`<li><span><b>${esc((b.partNames || []).join(' e ') || b.doneByName || '')}</b> · ${esc(b.title)} <span class="tag">Quadro</span><br><span class="small muted">${b.pending ? 'aguardando aprovação' : b.done ? `+${b.gain || 0} XP` : 'metade da dupla feita'}</span></span><button class="btn sm ghost" data-act="reopenBoard" data-id="${b.id}">Reabrir</button></li>`);
+        for (const h of hs) for (const x of h.tasks || []) if (x.done === t || x.pending) rows.push(`<li><span class="ic">${A.heroSvg(h, { noPet: true, noWeapon: true })}</span><span><b>${esc(h.name)}</b> · ${esc(x.title)}<br><span class="small muted">${x.pending ? 'aguardando aprovação' : `+${x.gain || 0} XP`}</span></span><button class="btn sm ghost" data-act="reopenTask" data-hero="${h.id}" data-id="${x.id}">Reabrir</button></li>`);
+        for (const b of boardList()) if (b.done === t || (b.parts || []).length) rows.push(`<li><span class="ic">${S.heroes[b.doneBy] ? A.heroSvg(S.heroes[b.doneBy], { noPet: true, noWeapon: true }) : ''}</span><span><b>${esc((b.partNames || []).join(' e ') || b.doneByName || '')}</b> · ${esc(b.title)} <span class="tag">Quadro</span><br><span class="small muted">${b.pending ? 'aguardando aprovação' : b.done ? `+${b.gain || 0} XP` : 'metade da dupla feita'}</span></span><button class="btn sm ghost" data-act="reopenBoard" data-id="${b.id}">Reabrir</button></li>`);
         return `<section class="card"><div class="card-h"><h3>Feitas hoje</h3><span class="small muted">Reabrir tira o XP de quem cumpriu.</span></div>${rows.length ? `<ul class="approvals">${rows.join('')}</ul>` : '<p class="small muted" style="margin:0">Ninguém concluiu tarefas hoje ainda.</p>'}</section>`; })()}
       <section class="card"><div class="card-h"><h3>Heróis da sala</h3><span class="small muted">${hs.length} de ${roomSlots()} vagas</span></div>
         ${hs.length ? `<ul class="kick-list">${hs.map((h) => `<li><span class="ic">${A.heroSvg(h, { noPet: true, noWeapon: true })}</span><span><b>${esc(h.name)}</b> ${roleTag(h)}<br><span class="small muted">Nível ${h.level} · ${D.CLASSES[h.cls].name}${Store.server ? ` · ${h.owner ? (h.owner === myAcct() ? 'sua conta' : 'conta própria') : 'sem conta'}` : ''}</span></span>${h.id === p.creatorId || h.id === S.me ? '' : `<button class="btn sm ghost danger" data-act="askKick" data-id="${h.id}">Expulsar</button>`}</li>`).join('')}</ul>` : '<p class="small muted" style="margin:0">Ninguém ainda.</p>'}</section>
       ${Store.server ? `<section class="card"><div class="card-h"><h3>Cópias de segurança</h3><button class="btn sm" data-act="snapNow">Fazer cópia agora</button></div>
         <p class="small muted" style="margin:0 0 10px">O servidor guarda sozinho uma cópia dos dados da sala antes de cada atualização do app e uma por dia (ficam as 14 mais recentes). Se algo der errado, volte a sala para uma delas.</p>
         ${S.snaps == null ? '<p class="small muted" style="margin:0">Carregando…</p>' : S.snaps.length ? `<ul class="snaps">${S.snaps.map((x) => `<li><span><b>${esc(fmtSnap(x.at))}</b> · ${esc(x.label)}<br><span class="small muted">${x.heroes} herói${x.heroes === 1 ? '' : 's'} · estágio ${x.stage}</span></span><button class="btn sm ghost" data-act="snapDl" data-id="${x.id}">Baixar</button><button class="btn sm ghost danger" data-act="snapAsk" data-id="${x.id}">Restaurar</button></li>`).join('')}</ul>` : '<p class="small muted" style="margin:0">A primeira cópia é feita na próxima vez que alguém salvar algo na sala.</p>'}</section>` : ''}
-      <section class="card"><h3>PIN das configurações</h3><p class="small muted" style="margin:6px 0 10px">${p.pin ? 'As configurações pedem o PIN para abrir, para o criador e para os co-criadores.' : 'Sem PIN, qualquer pessoa que escolher o personagem de um criador abre as configurações.'}</p>
-        ${isMainCreator() ? `<div class="row"><button class="btn sm" data-act="setPinAsk">${p.pin ? 'Trocar PIN' : 'Criar PIN'}</button>${p.pin ? '<button class="btn sm ghost" data-act="clearPin">Remover PIN</button>' : ''}</div>` : '<p class="small muted" style="margin:0">Só quem criou a sala troca o PIN. Os co-criadores usam o mesmo PIN.</p>'}</section>
+      <section class="card"><h3>PIN das configurações</h3><p class="small muted" style="margin:6px 0 10px">${p.pin ? 'As configurações pedem o PIN para abrir, para o organizador e para os co-organizadores.' : 'Sem PIN, qualquer pessoa que escolher o herói de um organizador abre as configurações.'}</p>
+        ${isMainCreator() ? `<div class="row"><button class="btn sm" data-act="setPinAsk">${p.pin ? 'Trocar PIN' : 'Criar PIN'}</button>${p.pin ? '<button class="btn sm ghost" data-act="clearPin">Remover PIN</button>' : ''}</div>` : '<p class="small muted" style="margin:0">Só quem criou a sala troca o PIN. Os co-organizadores usam o mesmo PIN.</p>'}</section>
       </div></div>`;
   }
   function requestsAdmin() {
     const open = openRequests();
-    return `<section class="card"><div class="card-h"><h3>Pedidos de recompensa</h3>${open.length ? `<span class="tag wait">${open.length} em aberto</span>` : ''}</div>
+    return `<section class="card"><div class="card-h"><h3>Pedidos de prêmio</h3>${open.length ? `<span class="tag wait">${open.length} em aberto</span>` : ''}</div>
       ${open.length ? `<ul class="approvals">${open.map((q) => { const h = S.heroes[q.heroId]; return `<li><span class="ic">${h ? A.heroSvg(h, { noPet: true, noWeapon: true }) : ''}</span><span><b>${esc(q.heroName)}</b> · ${esc(q.name)}<br><span class="small muted">${fmtDay(q.day)} · ${q.cost} XP · ${q.status === 'pending' ? 'aguardando aprovação' : 'aprovado, falta entregar'}</span></span>
-        <span class="row" style="gap:6px">${q.status === 'pending' ? `<button class="btn sm primary" data-act="reqOk" data-id="${q.id}">Aprovar</button><button class="btn sm ghost" data-act="reqNo" data-id="${q.id}">Recusar</button>` : `<button class="btn sm primary" data-act="reqDone" data-id="${q.id}">Marcar entregue</button>`}</span></li>`; }).join('')}</ul>` : '<p class="small muted" style="margin:0">Quando alguém pedir uma recompensa, o pedido aparece aqui.</p>'}</section>`;
+        <span class="row" style="gap:6px">${q.status === 'pending' ? `<button class="btn sm primary" data-act="reqOk" data-id="${q.id}">Aprovar</button><button class="btn sm ghost" data-act="reqNo" data-id="${q.id}">Recusar</button>` : `<button class="btn sm primary" data-act="reqDone" data-id="${q.id}">Marcar entregue</button>`}</span></li>`; }).join('')}</ul>` : '<p class="small muted" style="margin:0">Quando alguém pedir um prêmio, o pedido aparece aqui.</p>'}</section>`;
+  }
+  /* ----- Sala: pendências no topo e quatro grupos que abrem e fecham -----
+     Monta a tela a partir dos cartões de configurações, agrupando pelo título de cada um. */
+  const SALA_GROUPS = [
+    ['pessoas', 'Pessoas', 'Convidar, heróis, organizadores, quem pode criar, expulsar', ['Heróis da sala', 'Co-organizadores', 'Quem pode criar', 'Heróis importados']],
+    ['regras', 'Regras do jogo', 'Dificuldade, limite de XP, destaque, aprovação, obrigatórias', ['Dificuldade', 'Experiência por dia', 'Aprovação de tarefas', 'Tarefas obrigatórias']],
+    ['premios', 'Prêmios', 'O que dá para trocar por XP', ['Prêmios da vida real']],
+    ['seguranca', 'Sala e segurança', 'Nome, vagas, PIN e cópias de segurança', ['Sala', 'PIN das configurações', 'Cópias de segurança']],
+  ];
+  function settingsLayout(html) {
+    if (!/data-sala-root/.test(html)) return html; // tela do PIN ou sem permissão
+    const tpl = document.createElement('template'); tpl.innerHTML = html;
+    const by = {};
+    tpl.content.querySelectorAll('section.card').forEach((sec) => { const h = sec.querySelector('h3'); if (h) by[h.textContent.trim()] = sec; });
+    const take = (n) => { const sec = by[n]; if (!sec) return ''; delete by[n]; return sec.outerHTML; };
+    // pendências: pedidos de prêmio, tarefas para aprovar e o que foi feito hoje
+    let approve = '';
+    const ap = by['Aprovação de tarefas']; const ul = ap && ap.querySelector('ul.approvals');
+    if (ul) { approve = `<section class="card"><div class="card-h"><h3>Tarefas para aprovar</h3><span class="tag wait">${ul.children.length} esperando</span></div>${ul.outerHTML}</section>`; ul.remove(); }
+    const n = pendingCount();
+    const pend = `<section class="pendbox"><div class="card-h"><div><div class="eyebrow">Caixa de pendências</div><h3 class="pb-t">${n ? `${n} coisa${n === 1 ? '' : 's'} esperando você` : 'Nada esperando você'}</h3></div>${canInvite() ? '<button class="btn sm" data-act="invite">Convidar pessoas</button>' : ''}</div>
+      <div class="grid2">${take('Pedidos de prêmio')}${approve}</div>${take('Feitas hoje')}</section>`;
+    const groups = SALA_GROUPS.map(([k, name, sub, titles]) => {
+      const body = titles.map(take).join(''); if (!body) return '';
+      const open = (S.salaOpen || {})[k];
+      return `<details class="sgroup" ${open ? 'open' : ''}><summary data-act="salaGroup" data-v="${k}"><span><b>${name}</b><span class="small muted">${sub}</span></span><span class="chev" aria-hidden="true">▾</span></summary><div class="sg-body">${body}</div></details>`;
+    }).join('');
+    const rest = Object.values(by).map((sec) => sec.outerHTML).join(''); // algum cartão que não está em nenhum grupo
+    const head = tpl.content.querySelector('[data-sala-head]');
+    return `${head ? head.outerHTML : ''}${pend}${groups}${rest ? `<details class="sgroup" ${(S.salaOpen || {}).outros ? 'open' : ''}><summary data-act="salaGroup" data-v="outros"><span><b>Outros</b></span><span class="chev">▾</span></summary><div class="sg-body">${rest}</div></details>` : ''}`;
   }
   function permSection(hs) {
     const kids = hs.filter((h) => !isCreator(h.id));
     const row = (k, title, sub) => { const c = permCfg(k); return `<div class="field" style="margin:0 0 12px"><span class="lbl">${title}</span><div class="opts">${[['all', 'Todos'], ['org', 'Só organizadores'], ['some', 'Escolher']].map(([v, n]) => `<button class="opt" data-act="setPerm" data-k="${k}" data-v="${v}" aria-pressed="${c.mode === v}">${n}</button>`).join('')}</div>
       ${c.mode === 'some' ? `<div class="opts" style="margin-top:8px">${kids.length ? kids.map((h) => `<label class="check"><input type="checkbox" data-act="permHero" data-k="${k}" value="${h.id}" ${(c.heroes || []).includes(h.id) ? 'checked' : ''}> ${esc(h.name)}</label>`).join('') : '<span class="small muted">Ainda não há outros heróis.</span>'}</div>` : ''}<div class="small muted" style="margin-top:4px">${sub}</div></div>`; };
     return `<section class="card"><div class="card-h"><h3>Quem pode criar</h3><span class="small muted">Organizadores sempre podem.</span></div>
-      ${row('tasks', 'Tarefas (pessoais e missões do quadro)', 'Quem não pode criar também não edita nem apaga tarefas. As tarefas obrigatórias continuam aparecendo para todos.')}
-      ${row('rewards', 'Recompensas da vida real', 'Quem pode cadastra recompensas na aba Recompensas do próprio herói. Os pedidos continuam passando pela aprovação dos organizadores.')}</section>`;
+      ${row('tasks', 'Tarefas (pessoais e missões da guilda)', 'Quem não pode criar também não edita nem apaga tarefas. As tarefas obrigatórias continuam aparecendo para todos.')}
+      ${row('rewards', 'Prêmios', 'Quem pode cadastra prêmios na aba Prêmios. Os pedidos continuam passando pela aprovação dos organizadores.')}</section>`;
   }
   function approvalSection(hs) {
     const c = approvalCfg(); const items = pendingItems();
     const kids = hs.filter((h) => !isCreator(h.id));
     return `<section class="card"><div class="card-h"><h3>Aprovação de tarefas</h3>${items.length ? `<span class="tag wait">${items.length} esperando</span>` : ''}</div>
-      <p class="small muted" style="margin:0 0 8px">Com aprovação ligada, o XP só entra depois que um criador confirmar. Criadores não precisam de aprovação.</p>
+      <p class="small muted" style="margin:0 0 8px">Com aprovação ligada, o XP só entra depois que um organizador confirmar. Organizadores não precisam de aprovação.</p>
       <div class="opts">${[['off', 'Desligada'], ['all', 'Para todos'], ['some', 'Para alguns']].map(([k, n]) => `<button class="opt" data-act="setApproval" data-v="${k}" aria-pressed="${c.mode === k}">${n}</button>`).join('')}</div>
       ${c.mode === 'some' ? `<div class="opts" style="margin-top:8px">${kids.length ? kids.map((h) => `<label class="check"><input type="checkbox" data-act="approvalHero" value="${h.id}" ${(c.heroes || []).includes(h.id) ? 'checked' : ''}> ${esc(h.name)}</label>`).join('') : '<span class="small muted">Ainda não há outros heróis.</span>'}</div>` : ''}
       ${items.length ? `<ul class="approvals">${items.map((it) => `<li><span class="ic">${A.heroSvg(it.hero, { noPet: true, noWeapon: true })}</span><span><b>${esc(it.hero.name)}</b> · ${esc(it.task.title)}<br><span class="small muted">${it.kind === 'board' ? 'Missão da guilda' : D.DIFF[it.task.diff].name} · ${it.xp} XP</span></span><span class="row" style="gap:6px"><button class="btn sm primary" data-act="approve" data-kind="${it.kind}" data-hero="${it.hero.id}" data-id="${it.task.id}">Aprovar</button><button class="btn sm ghost" data-act="reject" data-kind="${it.kind}" data-hero="${it.hero.id}" data-id="${it.task.id}">Recusar</button></span></li>`).join('')}</ul>` : c.mode !== 'off' ? '<p class="small muted" style="margin:10px 0 0">Nada esperando aprovação agora.</p>' : ''}</section>`;
@@ -1725,8 +1894,8 @@
     }
     if (m.type === 'claim') {
       const h = S.heroes[m.heroId]; if (!h) return '';
-      return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="cl-t" data-stop><div class="eyebrow">Personagem sem conta</div><h3 id="cl-t">${esc(h.name)} é seu?</h3>
-        <p class="small" style="margin:6px 0 12px">Este personagem foi criado antes das contas. Se ele é seu, ligue-o à sua conta: depois disso, só você e o organizador da sala jogam com ele.</p>
+      return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="cl-t" data-stop><div class="eyebrow">Herói sem conta</div><h3 id="cl-t">${esc(h.name)} é seu?</h3>
+        <p class="small" style="margin:6px 0 12px">Este herói foi criado antes das contas. Se ele é seu, ligue-o à sua conta: depois disso, só você e o organizador da sala jogam com ele.</p>
         <div class="row"><button class="btn primary" data-act="claimHero">Sim, é meu</button><button class="btn ghost" data-act="closeModal">Não é meu</button></div></div></div>`;
     }
     if (m.type === 'invite') {
@@ -1789,8 +1958,8 @@
     }
     if (m.type === 'redeem') {
       const h = S.heroes[m.heroId], r = S.rewards[m.rewardId]; if (!h || !r) return '';
-      return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="rd-t" data-stop><div class="eyebrow">Resgatar recompensa</div><h3 id="rd-t">${esc(r.name)}</h3>
-        <p><b>${esc(h.name)}</b> vai reservar <b>${r.cost} XP de resgate</b> e fica com ${redeemBal(h) - r.cost}. O pedido vai para os criadores da sala; se for recusado, o XP volta. O nível do herói não muda.</p>
+      return `<div class="modal-bg" data-act="closeModal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="rd-t" data-stop><div class="eyebrow">Pedir prêmio</div><h3 id="rd-t">${esc(r.name)}</h3>
+        <p><b>${esc(h.name)}</b> vai reservar <b>${r.cost} XP de resgate</b> e fica com ${redeemBal(h) - r.cost}. O pedido vai para os organizadores da sala; se for recusado, o XP volta. O nível do herói não muda.</p>
         <div class="row"><button class="btn primary" data-act="redeem">Fazer pedido</button><button class="btn ghost" data-act="closeModal">Cancelar</button></div></div></div>`;
     }
     if (m.type === 'retire') {
@@ -2094,17 +2263,32 @@
     const ko = b.units.filter((u) => m.hp[u.id] <= 0).length; void ko;
   }
 
-  const sfx = (k) => Sound.play(k);
+  const sfx = (k, n) => { if (k === 'task' && n == null) { const h = S.heroes[S.me]; n = h ? (((h.log || {})[today()] || {}).t || 1) : 1; } Sound.play(k, n); };
   /* ---------------- Ações ---------------- */
-  function hero() { return S.heroes[S.heroId]; }
+  // o herói de quem está jogando (as abas Hoje, Herói e Prêmios sempre mostram o próprio herói)
+  function hero() { return S.heroes[S.me] || S.heroes[S.heroId]; }
   function saveCur(h) { Store.saveHero(h); render(); }
   const actions = {
     navToggle() { S.navOpen = !S.navOpen; render(); },
+    go(el) {
+      const v = el.dataset.v; S.navOpen = false; S.openRow = null; if (!S.me) return render();
+      if (v === 'settings') return actions.settings();
+      if (v === 'hero') { S.heroId = S.me; S.view = 'hero'; if (!['habilidades', 'loja', 'visual', 'conquistas'].includes(S.tab)) S.tab = 'habilidades'; S.selSkill = null; }
+      else S.view = v;
+      sfx('tap'); tidyAll(); render(); scrollTo(0, 0);
+    },
+    salaGroup(el) { S.salaOpen = Object.assign({}, S.salaOpen || {}); S.salaOpen[el.dataset.v] = !S.salaOpen[el.dataset.v]; render(); },
+    rowOpen(el) { S.openRow = S.openRow === el.dataset.id ? null : el.dataset.id; render(); },
+    moreOpts() { S.moreOpts = !S.moreOpts; render(); if (S.moreOpts) { const i = document.getElementById('task-title'); if (i) i.focus(); } },
+    toggleDone() { S.showDone = !S.showDone; render(); },
+    toggleHow() { S.showHow = !S.showHow; render(); },
+    toggleNight(el) { Sound.setVol('night', !!el.checked); render(); },
+    toggleMotion(el) { const on = !!el.checked; document.documentElement.classList.toggle('reduce-motion', on); lsSet('guilda-motion', on ? 'less' : 'full'); render(); },
     navGo(el) {
       const v = el.dataset.v; S.navOpen = false;
-      if (v.startsWith('tab:')) { if (!S.me) return render(); S.heroId = S.me; S.view = 'hero'; S.tab = v.slice(4); S.selSkill = null; tidyAll(); render(); scrollTo(0, 0); return; }
-      const map = { home: 'home', bestiary: 'bestiary', replay: 'replay', settings: 'settings', report: 'report', invite: 'invite', tutorial: 'tutorial', switchHero: 'switchHero', leaveRoom: 'leaveRoom', logout: 'logout' };
-      const fn = actions[map[v]]; if (fn) fn.call(actions, el); else render();
+      if (v.startsWith('tab:')) { const k = v.slice(4); if (k === 'tarefas') return actions.go({ dataset: { v: 'today' } }); if (k === 'recompensas') return actions.go({ dataset: { v: 'prizes' } }); S.tab = k; return actions.go({ dataset: { v: 'hero' } }); }
+      if (['home', 'today', 'prizes', 'hero', 'settings'].includes(v)) return actions.go({ dataset: { v } });
+      const fn = actions[v]; if (fn) fn.call(actions, el); else render();
     },
     home() { S.view = S.me ? 'home' : 'select'; S.heroId = null; S.diffPreview = null; render(); scrollTo(0, 0); },
     pickMe(el) {
@@ -2187,11 +2371,11 @@
       chooseHero(h.id); showToast(`<span><b>${esc(h.name)}</b> agora é seu. Só você e o organizador jogam com ele.</span>`);
     },
     async importHero(el) {
-      if (!canCreateHero()) { showToast('Não há vaga para mais um personagem seu.'); return; }
-      if (!(S.party && S.party.allowImport)) { showToast('O organizador não permite personagens importados.'); return; }
+      if (!canCreateHero()) { showToast('Não há vaga para mais um herói seu.'); return; }
+      if (!(S.party && S.party.allowImport)) { showToast('O organizador não permite heróis importados.'); return; }
       let src = null; try { src = (await serverCall('api_hero', el.dataset.code, el.dataset.id)).hero; } catch (e) { src = null; }
-      if (!src) { showToast('Não encontramos esse personagem na outra sala.'); return; }
-      if (src.owner !== myAcct()) { showToast('Só dá para trazer personagens ligados à sua conta.'); return; }
+      if (!src) { showToast('Não encontramos esse herói na outra sala.'); return; }
+      if (src.owner !== myAcct()) { showToast('Só dá para trazer heróis ligados à sua conta.'); return; }
       const h = importedHero(src, el.dataset.code);
       if (S.party && S.party.last) h.seenBattle = S.party.last.id;
       Store.saveHero(h); post('import', `${h.name} chegou de outra sala (nível ${h.level})`);
@@ -2212,7 +2396,7 @@
     choreWho(el) { S.choreAssign = el.value; render(); },
     delChore(el) { if (masterLocked()) return; Store.delDoc('chores/' + el.dataset.id); render(); },
     bdaySave() { const m = S.modal; const h = hero(); S.modal = null; if (h && m && !h.birth && /^\d{4}-\d{2}-\d{2}$/.test(m.v)) { h.birth = m.v; saveCur(h); showToast('Aniversário salvo.'); } render(); },
-    toggleImport(el) { if (masterLocked()) { render(); return; } const p = clone(S.party || newParty()); p.allowImport = !!el.checked; Store.saveParty(p); showToast(p.allowImport ? 'Personagens importados permitidos.' : 'Personagens importados não são mais aceitos.'); render(); },
+    toggleImport(el) { if (masterLocked()) { render(); return; } const p = clone(S.party || newParty()); p.allowImport = !!el.checked; Store.saveParty(p); showToast(p.allowImport ? 'Heróis importados permitidos.' : 'Heróis importados não são mais aceitos.'); render(); },
     askKick(el) { if (masterLocked()) return; const h = S.heroes[el.dataset.id]; if (!h) return; S.modal = { type: 'kick', heroId: h.id }; render(); setTimeout(() => { const i = document.getElementById('kick-in'); if (i) i.focus(); }, 30); },
     invite() { if (!canInvite()) return; S.modal = { type: 'invite' }; render(); },
     copyInvite() {
@@ -2223,7 +2407,7 @@
     shareInvite() { const url = inviteUrl(); try { navigator.share({ title: (S.roomMeta && S.roomMeta.name) || APP_NAME, text: inviteText(), url }).catch(() => {}); } catch (e) { /* sem compartilhar */ } },
     copyCode() { const c = S.room; try { navigator.clipboard.writeText(c).then(() => showToast(`Código <b>${c}</b> copiado.`), () => showToast(`Código da sala: <b>${c}</b>`)); } catch (e) { showToast(`Código da sala: <b>${c}</b>`); } },
     create() { if (!canCreateHero()) return; S.draft = { name: '', cls: 'guerreiro', look: randomLook('humano') }; S.view = 'create'; render(); scrollTo(0, 0); },
-    open(el) { if (el.dataset.id !== S.me) return; S.heroId = el.dataset.id; S.view = 'hero'; S.tab = 'tarefas'; S.selSkill = null; tidyAll(); render(); scrollTo(0, 0); },
+    open(el) { if (el.dataset.id !== S.me) return; S.heroId = el.dataset.id; S.view = 'hero'; if (!['habilidades', 'loja', 'visual', 'conquistas'].includes(S.tab)) S.tab = 'habilidades'; S.selSkill = null; tidyAll(); render(); scrollTo(0, 0); },
     cls(el) { S.draft.cls = el.dataset.v; render(); },
     look(el) {
       const k = el.dataset.k, v = el.dataset.v;
@@ -2386,7 +2570,7 @@
       const id = 'q' + uidGen();
       Store.setDoc('requests/' + id, { id, heroId: h.id, heroName: h.name, rewardId: r.id, name: r.name, cost: r.cost, status: 'pending', day: today(), at: Date.now() });
       if (r.stock != null) Store.setDoc('rewards/' + r.id, Object.assign(clone(r), { stock: Math.max(0, r.stock - 1) }));
-      saveCur(h); post('req', `${h.name} pediu a recompensa "${r.name}"`);
+      saveCur(h); post('req', `${h.name} pediu o prêmio "${r.name}"`);
       showToast(`<span>Pedido enviado: <b>${esc(r.name)}</b>. Aguarde a aprovação.</span>`);
     },
     reqOk(el) { const q = S.requests[el.dataset.id]; if (!q || masterLocked()) return; Store.setDoc('requests/' + q.id, Object.assign(clone(q), { status: 'approved' })); sendInbox(q.heroId, 'reqok', { title: q.name }); post('ok', `${S.heroes[S.me].name} aprovou o pedido "${q.name}" de ${q.heroName}`); render(); },
@@ -2432,7 +2616,7 @@
     },
     replayEvent() { const eb = S.party && S.party.eventBattle; if (eb) openReplay(battleOf(eb)); },
     report() { if (!isCreator()) return; S.view = 'report'; render(); scrollTo(0, 0); },
-    toggleSound() { Sound.toggle(); document.querySelectorAll('[data-act="toggleSound"]').forEach((b) => { b.textContent = Sound.on ? 'Som ligado' : 'Som desligado'; }); if (!(S.modal && S.modal.type === 'replay')) render(); },
+    toggleSound() { Sound.toggle(); if (!(S.modal && S.modal.type === 'replay')) render(); },
     bestiary() { S.view = 'bestiary'; render(); scrollTo(0, 0); },
 
     delReward(el) { const r = S.rewards[el.dataset.id]; if (!(isCreator() ? !masterLocked() : r && r.by === S.me && canMake('rewards'))) return; Store.delDoc('rewards/' + el.dataset.id); render(); },
@@ -2449,7 +2633,7 @@
       const p = clone(S.party); const set = new Set((p.coCreators || []).filter((id) => S.heroes[id]));
       if (el.checked) set.add(el.value); else set.delete(el.value);
       p.coCreators = [...set]; Store.saveParty(p); render();
-      const h = S.heroes[el.value]; showToast(el.checked ? `<span><b>${esc(h.name)}</b> agora ${h.look && h.look.gender === 'f' ? 'é co-criadora' : 'é co-criador'} da sala.</span>` : `<span><b>${esc(h.name)}</b> não mexe mais nas configurações.</span>`);
+      const h = S.heroes[el.value]; showToast(el.checked ? `<span><b>${esc(h.name)}</b> agora ${h.look && h.look.gender === 'f' ? 'é co-organizadora' : 'é co-organizador'} da sala.</span>` : `<span><b>${esc(h.name)}</b> não mexe mais nas configurações.</span>`);
     },
     setPinAsk() { if (masterLocked() || !isMainCreator()) return; S.modal = { type: 'pin', mode: 'set' }; render(); setTimeout(() => { const i = document.getElementById('pin-in'); if (i) i.focus(); }, 30); },
     clearPin() { if (masterLocked() || !isMainCreator()) return; const p = clone(S.party); delete p.pin; Store.saveParty(p); S.masterOk = false; render(); showToast('PIN removido.'); },
@@ -2458,6 +2642,14 @@
     skip() { const m = S.modal; clearTimeout(replayTimer); if (!m.mounted) { m.mounted = true; m.battle.units.forEach((u) => { m.hp[u.id] = u.maxHp; }); } while (m.step < m.battle.log.length) { applyFx(m.battle.log[m.step]); m.step++; } m.finished = true; mountReplay(); },
     noop() {},
   };
+  // sons das ações: tocam só quando a ação mudou algo (compra feita, elogio enviado, pedido criado, desfeito)
+  {
+    const snap = () => { const h = S.me && S.heroes[S.me]; return JSON.stringify([h && h.spent, h && h.tasks && h.tasks.map((t) => t.done + ':' + t.pending), h && h.kudos, h && h.cosmetics, h && h.gear, Object.keys(S.requests || {}).length, Object.values(S.board || {}).map((b) => b.done + ':' + (b.parts || []).length)]); };
+    const wrap = (name, snd) => { const fn = actions[name]; if (!fn) return; actions[name] = function (el) { const a = snap(); const r = fn.call(this, el); const after = () => { if (snap() !== a) sfx(snd); }; if (r && r.then) r.then(after); else after(); return r; }; };
+    ['buyGear', 'buyPotion', 'buyCos', 'buyMerchant'].forEach((n) => wrap(n, 'coin'));
+    wrap('sendKudos', 'kudos'); wrap('redeem', 'prize');
+    ['undoTask', 'undoBoard', 'undo'].forEach((n) => wrap(n, 'undo'));
+  }
 
   document.addEventListener('click', (ev) => {
     if (S.navOpen && !ev.target.closest('.navmenu')) { S.navOpen = false; render(); }
@@ -2484,6 +2676,7 @@
     if (el.dataset.input === 'rename') { const h = hero(); const v = el.value.trim(); if (!v) return; h.name = v; clearTimeout(renameTimer); renameTimer = setTimeout(() => Store.saveHero(h), 700); }
   });
   document.addEventListener('change', (ev) => {
+    if (ev.target.id === 'vol-fx' || ev.target.id === 'vol-music') { Sound.setVol(ev.target.id === 'vol-fx' ? 'fx' : 'music', Number(ev.target.value)); if (ev.type === 'change') Sound.play(ev.target.id === 'vol-fx' ? 'kudos' : 'tap'); return; }
     if (ev.target.id === 'birth-edit' && !S.readOnly) { const h = hero(); const v = ev.target.value; if (h && !h.birth && /^\d{4}-\d{2}-\d{2}$/.test(v) && v <= today()) { S.modal = { type: 'bdayLock', v }; render(); } }
     if (ev.target.id === 'room-switch' && ev.target.value && ev.target.value !== S.room) { enterRoom(ev.target.value); return; }
     if (ev.target.id === 'new-every') S.newEvery = ev.target.value;
@@ -2553,7 +2746,7 @@
       const cap = Math.max(0, Math.min(5000, Math.round(Number(document.getElementById('cap-in').value) || 0)));
       const mg = Math.max(0, Math.min(5000, Math.round(Number(document.getElementById('mvp-in').value) || 0)));
       const p = clone(S.party || newParty()); p.xpCap = cap || null; p.mvpGold = mg || null; Store.saveParty(p);
-      post('cfg', cap ? `Limite diário de XP definido em ${cap} XP por personagem` : 'Limite diário de XP removido');
+      post('cfg', cap ? `Limite diário de XP definido em ${cap} XP por herói` : 'Limite diário de XP removido');
       showToast(cap ? `<span>Limite diário: <b>${cap} XP</b> por personagem.</span>` : 'Sem limite diário de XP.'); render(); return;
     }
     if (form === 'chore') {
@@ -2567,16 +2760,16 @@
       inp.value = ''; clearInput(inp.id); render(); showToast(`<span>Tarefa obrigatória: <b>${esc(title)}</b></span>`); return;
     }
     if (form === 'reward') {
-      if (!canMake('rewards')) { showToast(`Nesta sala, ${permNote('rewards')} criam recompensas.`); return; }
+      if (!canMake('rewards')) { showToast(`Nesta sala, ${permNote('rewards')} criam prêmios.`); return; }
       if (isCreator() && masterLocked()) return actions.askPin();
       const n = document.getElementById('rw-name'), c = document.getElementById('rw-cost');
       const name = n.value.trim(), cost = Math.round(Number(c.value));
       if (!name) { n.focus(); return; } if (!(cost > 0)) { c.focus(); return; }
       const wk = Math.round(Number(document.getElementById('rw-week').value)) || null; const stv = document.getElementById('rw-stock').value; const stock = stv === '' ? null : Math.max(0, Math.round(Number(stv)));
       const id = 'r' + uidGen(); Store.setDoc('rewards/' + id, { id, name, cost, perWeek: wk, stock, createdAt: Date.now(), by: S.me, byName: (S.heroes[S.me] || {}).name || '' });
-      if (!isCreator()) post('reward', `${(S.heroes[S.me] || {}).name || 'Alguém'} cadastrou a recompensa "${name}" (${cost} XP)`);
+      if (!isCreator()) post('reward', `${(S.heroes[S.me] || {}).name || 'Alguém'} cadastrou o prêmio "${name}" (${cost} XP)`);
       document.getElementById('rw-week').value = ''; document.getElementById('rw-stock').value = '';
-      n.value = ''; c.value = ''; clearInput('rw-name'); clearInput('rw-cost'); render(); document.getElementById('rw-name').focus(); showToast(`<span>Recompensa cadastrada: <b>${esc(name)}</b></span>`); return;
+      n.value = ''; c.value = ''; clearInput('rw-name'); clearInput('rw-cost'); render(); document.getElementById('rw-name').focus(); showToast(`<span>Prêmio cadastrado: <b>${esc(name)}</b></span>`); return;
     }
     if (form === 'edit') return saveEdit();
     if ((form === 'board' || form === 'task') && !canMake('tasks')) { showToast(`Nesta sala, ${permNote('tasks')} criam tarefas.`); return; }
@@ -2586,7 +2779,7 @@
     }
     const inp = document.getElementById('task-title'); const title = inp.value.trim(); if (!title) { inp.focus(); return; }
     const due = document.getElementById('task-due').value || null;
-    if (S.newTarget === 'guild') { const duoEl = document.getElementById('task-duo'); addBoardTask(title, null, due, duoEl && duoEl.checked); inp.value = ''; clearInput(inp.id); S.newDue = ''; render(); showToast('<span>Missão fixada no <b>quadro da guilda</b>.</span>'); document.getElementById('task-title').focus(); return; }
+    if (S.newTarget === 'guild') { const duoEl = document.getElementById('task-duo'); addBoardTask(title, null, due, duoEl && duoEl.checked, S.boardWho || []); inp.value = ''; clearInput(inp.id); S.newDue = ''; render(); showToast('<span>Missão fixada no <b>quadro da guilda</b>.</span>'); document.getElementById('task-title').focus(); return; }
     const h = hero(); h.tasks = h.tasks || [];
     if (h.tasks.length >= MAX_TASKS) { showToast(`Limite de ${MAX_TASKS} tarefas. Conclua ou apague algumas.`); return; }
     const fq = freqFields(readNewFreq()); S.newFrom = null;
@@ -2599,7 +2792,7 @@
   function kickHero(id) {
     const h = S.heroes[id]; if (!h) return;
     const p = clone(S.party || newParty());
-    if (p.creatorId === id) { showToast('O criador da sala não pode ser expulso.'); return; }
+    if (p.creatorId === id) { showToast('O organizador principal não pode ser expulso.'); return; }
     p.coCreators = (p.coCreators || []).filter((x) => x !== id);
     if (p.approval && p.approval.heroes) p.approval.heroes = p.approval.heroes.filter((x) => x !== id);
     Store.saveParty(p);
@@ -2628,7 +2821,7 @@
     if (!(me && S.heroes[me]) && Store.server && S.acct) { const mine = heroList().filter((h) => h.owner === myAcct()); if (mine.length === 1) me = mine[0].id; }
     S.me = me && S.heroes[me] ? me : null; S.masterOk = false; S.meRoom = S.me ? code : null;
     Acct.room();
-    S.view = S.me ? 'home' : 'select';
+    S.view = S.me ? 'today' : 'select';
     tidyAll(); render(); scrollTo(0, 0);
     await resolveDay(false); maybeShowReport(); processInbox();
   }
@@ -2646,7 +2839,7 @@
     const v = (document.getElementById('pin-in').value || '').trim(); const m = S.modal;
     if (m.mode === 'set') {
       if (!/^[0-9]{4,8}$/.test(v)) { m.err = 'Use de 4 a 8 números.'; render(); return; }
-      const p = clone(S.party || { stage: 1, lastBattleDay: today(), earned: {}, history: [], last: null }); p.pin = v; Store.saveParty(p); S.masterOk = true; S.modal = null; render(); showToast('PIN do criador criado.'); return;
+      const p = clone(S.party || { stage: 1, lastBattleDay: today(), earned: {}, history: [], last: null }); p.pin = v; Store.saveParty(p); S.masterOk = true; S.modal = null; render(); showToast('PIN dos organizadores criado.'); return;
     }
     if (S.party && v === S.party.pin) { S.masterOk = true; S.modal = null; render(); showToast('Mesa do mestre destravada.'); }
     else { m.err = 'PIN incorreto.'; render(); }
@@ -2716,7 +2909,7 @@
     S.modal = null; render(); showToast('Tarefa atualizada.');
   }
 
-  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && S.tut) { endTut(); return; } if (ev.key === 'Escape' && S.modal && S.modal.type !== 'recovery') { clearTimeout(replayTimer); Sound.music(false); S.modal = null; render(); } });
+  document.addEventListener('keydown', (ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target && ev.target.dataset && ev.target.dataset.act === 'rowOpen') { ev.preventDefault(); actions.rowOpen(ev.target); return; } if (ev.key === 'Escape' && S.navOpen) { S.navOpen = false; render(); return; } if (ev.key === 'Escape' && S.tut) { endTut(); return; } if (ev.key === 'Escape' && S.modal && S.modal.type !== 'recovery') { clearTimeout(replayTimer); Sound.music(false); S.modal = null; render(); } });
   window.addEventListener('resize', () => { if (S.view === 'hero' && S.tab === 'habilidades') drawLinks(); });
 
   // virada do dia e contagem regressiva

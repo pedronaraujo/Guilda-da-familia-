@@ -99,11 +99,11 @@ with sync_playwright() as p:
     # ---------- quadro: rostos, filtro, desfazer ----------
     go_home(A); menu(A, 'switchHero'); W(A); new_hero(A, 'Beto', 'guardiao'); go_home(A)
     menu(A, 'switchHero'); W(A); A.click('xpath=//button[@data-act="pickMe"][.//div[@class="nm" and text()="Ana"]]'); W(A, 1200); close_modal(A)
-    nav.menu(A, 'today'); nav.more(A); A.click('[data-act=target][data-v=guild]'); W(A, 300); A.click('[data-act=freq][data-v=once]'); W(A, 200)
-    A.fill('#task-title', 'Tirar o lixo'); A.click('xpath=//label[contains(@class,"who-item")][.//span[text()="Beto"]]'); W(A, 300); A.click('form[data-form=task] button[type=submit]'); W(A, 1000)
-    A.click('xpath=//label[contains(@class,"who-item") and contains(@class,"any")]'); W(A, 300)
-    A.fill('#task-title', 'Lavar a louça'); A.click('form[data-form=task] button[type=submit]'); W(A, 1000)
-    A.fill('#task-title', 'Regar plantas no sábado'); A.fill('#new-from', plus(4)); A.dispatch_event('#new-from', 'change'); W(A, 300); A.click('form[data-form=task] button[type=submit]'); W(A, 1200)
+    nav.menu(A, 'today'); nav.more(A); A.click('[data-act=freq][data-v=once]'); W(A, 200)
+    resp = lambda v: A.click(f'xpath=//button[@data-act="resp"][.//span[text()="{v}"]]')
+    A.fill('#task-title', 'Tirar o lixo'); resp('Beto'); W(A, 300); resp('Eu'); W(A, 300); A.click('form[data-form=task] button[type=submit]'); W(A, 1000)
+    A.fill('#task-title', 'Lavar a louça'); resp('Qualquer pessoa'); W(A, 300); A.click('form[data-form=task] button[type=submit]'); W(A, 1000)
+    A.fill('#task-title', 'Regar plantas no sábado'); resp('Qualquer pessoa'); W(A, 300); A.fill('#new-from', plus(4)); A.dispatch_event('#new-from', 'change'); W(A, 300); A.click('form[data-form=task] button[type=submit]'); W(A, 1200)
     nav.show(A, 'Regar plantas')
     row = lambda t: f'xpath=//div[contains(@class,"today")]//li[contains(@class,"task")][.//div[@class="t" and starts-with(normalize-space(.),"{t}")]]'
     n_lixo = len(A.query_selector_all(row('Tirar o lixo') + '//span[contains(concat(" ",@class," ")," face ")]'))

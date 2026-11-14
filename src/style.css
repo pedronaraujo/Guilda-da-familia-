@@ -907,3 +907,45 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
 .section-t { flex-wrap: wrap; row-gap: 2px; }
 .section-t h3 { white-space: nowrap; }
 @media (max-width: 520px) { .section-t > .small { flex-basis: 100%; } }
+
+/* ---------- 2026-11-14: ações visíveis na tarefa, tarefas dos outros, responsável, temas de classe ---------- */
+.task .ricons { display: flex; gap: 4px; align-items: center; }
+.task .ricons:empty { display: none; }
+.ri { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; padding: 0; }
+.ri svg { width: 17px; height: 17px; }
+.ri:hover, .ri:focus-visible { color: var(--ink, #fff); border-color: var(--gold); background: rgba(255,255,255,.04); }
+.ri.danger:hover, .ri.danger:focus-visible { color: var(--c-danger, #ff6b6b); border-color: var(--c-danger, #ff6b6b); }
+@media (max-width: 520px) {
+  .task { grid-template-columns: auto 1fr auto; row-gap: 6px; }
+  .task .ricons { grid-column: 2 / -1; justify-content: flex-end; margin-top: -4px; }
+  .ri { width: 34px; height: 30px; }
+}
+.task.other { opacity: .82; }
+.task.other .done-btn { border-style: dashed; cursor: not-allowed; }
+.others-h { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; font-weight: 600; }
+.others-h .face { width: 28px; height: 28px; }
+.others-h .small { font-weight: 400; }
+.resp { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.resp .lbl { font-size: 13px; color: var(--muted); margin-right: 2px; }
+.resp-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-2); color: inherit; cursor: pointer; font: inherit; font-size: 14px; min-height: 34px; }
+.resp-chip .face { width: 26px; height: 26px; }
+.resp-chip .wi { width: 26px; height: 26px; display: grid; place-items: center; }
+.resp-chip[aria-pressed="true"] { border-color: var(--gold); background: rgba(240, 192, 90, .14); box-shadow: 0 0 0 1px var(--gold) inset; }
+/* tema da classe: fundo tingido, brilho e símbolo da classe ao fundo */
+html[data-cls] body {
+  background:
+    var(--motif),
+    radial-gradient(1200px 520px at 50% -120px, var(--glow1) 0%, transparent 62%),
+    radial-gradient(900px 600px at 100% 100%, var(--glow2) 0%, transparent 70%),
+    var(--bg);
+  background-attachment: fixed, fixed, fixed, fixed;
+  transition: background-color .4s;
+}
+html[data-cls] .tabbar button[aria-current="page"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+html[data-cls] .tabbar { border-top-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+html[data-cls] .topbar.tb { border-bottom-color: color-mix(in srgb, var(--accent) 28%, var(--line)); }
+html[data-cls] .eyebrow { color: color-mix(in srgb, var(--accent) 70%, var(--gold)); }
+html[data-cls] .tabs [role=tab][aria-selected="true"] { border-bottom-color: var(--accent); }
+html[data-cls] .tabbar { background: color-mix(in srgb, var(--bg) 94%, transparent); }
+@media (min-width: 900px) { html[data-cls] .tabbar { background: color-mix(in srgb, var(--bg-2) 92%, transparent); } }
+html[data-cls] .stage { background: linear-gradient(var(--panel-2), var(--bg-2) 78%, color-mix(in srgb, var(--accent) 12%, var(--bg-2))); }

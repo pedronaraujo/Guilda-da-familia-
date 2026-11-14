@@ -80,7 +80,7 @@ with sync_playwright() as p:
     A.click(f'xpath=//button[contains(@class,"pickme")][.//div[@class="nm" and text()="Ana"]]'); W(A, 800)
     # missão no quadro para qualquer um
     nav.menu(A, 'today', 600)
-    A.fill('#task-title', 'Lavar a louça'); nav.more(A); A.click('[data-act=target][data-v=guild]'); A.click('[data-act=diff][data-v=m]'); A.click('[data-act=freq][data-v=once]'); A.click('form[data-form=task] button[type=submit]'); W(A, 900)
+    A.fill('#task-title', 'Lavar a louça'); nav.more(A); A.click('.resp [data-act=resp][data-v="*"]'); A.click('[data-act=diff][data-v=m]'); A.click('[data-act=freq][data-v=once]'); A.click('form[data-form=task] button[type=submit]'); W(A, 900)
     go_home(A)
     # ---------- convite com conta obrigatória ----------
     nav.invite(A); link = A.input_value('#invite-url'); close_modal(A)

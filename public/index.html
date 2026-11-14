@@ -920,6 +920,48 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
 .section-t h3 { white-space: nowrap; }
 @media (max-width: 520px) { .section-t > .small { flex-basis: 100%; } }
 
+/* ---------- 2026-11-14: ações visíveis na tarefa, tarefas dos outros, responsável, temas de classe ---------- */
+.task .ricons { display: flex; gap: 4px; align-items: center; }
+.task .ricons:empty { display: none; }
+.ri { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; padding: 0; }
+.ri svg { width: 17px; height: 17px; }
+.ri:hover, .ri:focus-visible { color: var(--ink, #fff); border-color: var(--gold); background: rgba(255,255,255,.04); }
+.ri.danger:hover, .ri.danger:focus-visible { color: var(--c-danger, #ff6b6b); border-color: var(--c-danger, #ff6b6b); }
+@media (max-width: 520px) {
+  .task { grid-template-columns: auto 1fr auto; row-gap: 6px; }
+  .task .ricons { grid-column: 2 / -1; justify-content: flex-end; margin-top: -4px; }
+  .ri { width: 34px; height: 30px; }
+}
+.task.other { opacity: .82; }
+.task.other .done-btn { border-style: dashed; cursor: not-allowed; }
+.others-h { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; font-weight: 600; }
+.others-h .face { width: 28px; height: 28px; }
+.others-h .small { font-weight: 400; }
+.resp { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.resp .lbl { font-size: 13px; color: var(--muted); margin-right: 2px; }
+.resp-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-2); color: inherit; cursor: pointer; font: inherit; font-size: 14px; min-height: 34px; }
+.resp-chip .face { width: 26px; height: 26px; }
+.resp-chip .wi { width: 26px; height: 26px; display: grid; place-items: center; }
+.resp-chip[aria-pressed="true"] { border-color: var(--gold); background: rgba(240, 192, 90, .14); box-shadow: 0 0 0 1px var(--gold) inset; }
+/* tema da classe: fundo tingido, brilho e símbolo da classe ao fundo */
+html[data-cls] body {
+  background:
+    var(--motif),
+    radial-gradient(1200px 520px at 50% -120px, var(--glow1) 0%, transparent 62%),
+    radial-gradient(900px 600px at 100% 100%, var(--glow2) 0%, transparent 70%),
+    var(--bg);
+  background-attachment: fixed, fixed, fixed, fixed;
+  transition: background-color .4s;
+}
+html[data-cls] .tabbar button[aria-current="page"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+html[data-cls] .tabbar { border-top-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+html[data-cls] .topbar.tb { border-bottom-color: color-mix(in srgb, var(--accent) 28%, var(--line)); }
+html[data-cls] .eyebrow { color: color-mix(in srgb, var(--accent) 70%, var(--gold)); }
+html[data-cls] .tabs [role=tab][aria-selected="true"] { border-bottom-color: var(--accent); }
+html[data-cls] .tabbar { background: color-mix(in srgb, var(--bg) 94%, transparent); }
+@media (min-width: 900px) { html[data-cls] .tabbar { background: color-mix(in srgb, var(--bg-2) 92%, transparent); } }
+html[data-cls] .stage { background: linear-gradient(var(--panel-2), var(--bg-2) 78%, color-mix(in srgb, var(--accent) 12%, var(--bg-2))); }
+
 </style>
 </head>
 <body>
@@ -3652,6 +3694,39 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
   }
 
   /* ---------------- Render ---------------- */
+  /* ----- Tema por classe: o site assume as cores e o símbolo da classe do herói em jogo ----- */
+  const MOTIF = {
+    gelo: '<path d="M30 14v32M16 22l28 16M16 38l28-16M30 14l-4 4M30 14l4 4M30 46l-4-4M30 46l4-4"/>',
+    fogo: '<path d="M30 46c-8 0-12-6-10-13 2-6 7-8 6-15 6 4 9 9 8 14 2-1 3-3 3-5 4 5 4 10 2 13-2 4-5 6-9 6z"/>',
+    arqueiro: '<path d="M16 44L44 16M44 16h-9M44 16v9M16 44l2-7M16 44l7-2M20 40l-5-1M20 40l1 5"/>',
+    paladino: '<circle cx="30" cy="30" r="7"/><path d="M30 13v6M30 41v6M13 30h6M41 30h6M18 18l4 4M38 38l4 4M42 18l-4 4M22 38l-4 4"/>',
+    guerreiro: '<path d="M17 17l26 26M43 17L17 43M20 36l4 4M36 40l4-4M14 46l6-6M46 46l-6-6"/>',
+    druida: '<path d="M18 42c0-14 10-24 26-26-2 16-12 26-26 26zM18 42l14-14"/>',
+    curandeiro: '<path d="M26 16h8v10h10v8H34v10h-8V34H16v-8h10z"/>',
+    ladino: '<path d="M38 16a14 14 0 1 0 6 22 11 11 0 1 1-6-22z"/>',
+    guardiao: '<path d="M30 14l13 5v10c0 9-6 15-13 18-7-3-13-9-13-18V19z"/>',
+    bruxa: '<path d="M30 14l4 11 11 1-9 7 3 11-9-6-9 6 3-11-9-7 11-1z"/>',
+    bardo: '<path d="M26 40V18l14-4v22M26 40a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM40 36a4 4 0 1 1-8 0 4 4 0 0 1 8 0z"/>',
+    xama: '<path d="M30 30c0-3 4-3 4 0 0 5-8 5-8 0 0-8 12-8 12 0 0 10-16 10-16 0 0-12 20-12 20 0"/>',
+    monge: '<path d="M44 26a14 14 0 1 1-6-10"/><path d="M30 44c-6-4-8-9-8-14 4 0 7 2 8 5 1-3 4-5 8-5 0 5-2 10-8 14z"/>',
+    inventor: '<circle cx="30" cy="30" r="6"/><path d="M30 16v5M30 39v5M16 30h5M39 30h5M20 20l4 4M36 36l4 4M40 20l-4 4M24 36l-4 4"/><circle cx="30" cy="30" r="11"/>',
+    princesa: '<path d="M16 40l3-18 7 8 4-12 4 12 7-8 3 18z"/><path d="M16 44h28"/>',
+  };
+  const hexMix = (a, b, t) => { const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)); const x = p(a), y = p(b); return '#' + x.map((v, i) => Math.round(v * t + y[i] * (1 - t)).toString(16).padStart(2, '0')).join(''); };
+  let themeCur;
+  function applyTheme(cls) {
+    const c = cls && D.CLASSES[cls] ? cls : null;
+    if (c === themeCur) return; themeCur = c;
+    const root = document.documentElement; const st = root.style;
+    const keys = ['--bg', '--bg-2', '--panel', '--panel-2', '--line', '--glow1', '--glow2', '--accent', '--motif'];
+    if (!c) { keys.forEach((k) => st.removeProperty(k)); delete root.dataset.cls; return; }
+    const col = D.CLASSES[c].color;
+    const vals = { '--bg': hexMix(col, '#0c1013', 0.07), '--bg-2': hexMix(col, '#12181c', 0.09), '--panel': hexMix(col, '#171f25', 0.11), '--panel-2': hexMix(col, '#1f2930', 0.13), '--line': hexMix(col, '#2b3842', 0.22), '--glow1': hexMix(col, '#0c1013', 0.30), '--glow2': hexMix(col, '#0c1013', 0.16), '--accent': col };
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180"><g fill="none" stroke="${col}" stroke-opacity=".07" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g>${MOTIF[c] || ''}</g><g transform="translate(90 90) rotate(-14 30 30)">${MOTIF[c] || ''}</g></g></svg>`;
+    vals['--motif'] = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+    Object.entries(vals).forEach(([k, v]) => st.setProperty(k, v)); root.dataset.cls = c;
+    const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', vals['--bg']);
+  }
   function render() {
     if (!S.ready || S.busy) { $app.innerHTML = `<div class="loading"><div><h2>Abrindo os portões da guilda…</h2><p class="muted">Carregando os heróis da guilda.</p></div></div>`; return; }
     if (S.room && S.view !== 'rooms') computeChance();
@@ -3680,6 +3755,7 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
     else if (S.view === 'prizes' && S.heroes[S.me]) html += prizesView(S.heroes[S.me]);
     else { S.view = 'home'; html += homeView(); }
     html += tabbar();
+    applyTheme(S.view === 'create' && S.draft ? S.draft.cls : S.room && S.me && S.heroes[S.me] && !['rooms', 'select'].includes(S.view) ? S.heroes[S.me].cls : null);
     document.body.classList.toggle('has-tabbar', !!(S.room && S.me && S.heroes[S.me] && !['rooms', 'select', 'create'].includes(S.view)));
     if (!document.getElementById('page')) $app.innerHTML = '<div id="page"></div><div id="overlay"></div><div id="toast-root"></div>';
     document.getElementById('page').innerHTML = `<div class="wrap">${html}</div>`;
@@ -3700,9 +3776,9 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
     { view: 'home', sel: '.tabbar', title: 'Cinco lugares, sempre à mão', text: () => `Guilda é o salão e a batalha. Tarefas é o que fazer no dia. Herói é onde ele evolui e muda o visual. Prêmios tem a loja (ouro) e os prêmios de verdade (XP).${isCreator() ? ' Sala, só para o organizador, guarda as regras e as pendências.' : ''}` },
     { view: 'home', sel: '.nightfight', title: 'A batalha da meia-noite', text: () => 'Toda meia-noite a guilda enfrenta estes inimigos. Vencer dá ouro e avança de estágio. A chance aparece também no topo, ao lado da contagem.' },
     { view: 'home', sel: '.slot.other .kudos-btn', title: 'Elogios', text: () => `Elogie alguém com um emoji: a pessoa ganha XP. Você tem ${D.KUDOS_PER_DAY} elogios por dia, um para cada pessoa.` },
-    { view: 'today', sel: '.quickadd', title: 'Crie uma tarefa', text: () => 'Na aba Tarefas, escreva o que vai fazer, escolha a dificuldade e toque em Adicionar. Em "Mais opções" dá para repetir, agendar, pôr horário ou mandar para a guilda.' },
+    { view: 'today', sel: '.quickadd', title: 'Crie uma tarefa', text: () => 'Na aba Tarefas, escreva o que vai fazer, escolha a dificuldade e o responsável (você, outra pessoa ou qualquer pessoa) e toque em Adicionar. Em "Mais opções" dá para repetir, agendar e pôr horário.' },
     { view: 'today', sel: '.daystrip', title: 'Seu dia num olhar', text: () => `XP de hoje${xpCap() ? ` (o limite da sala é ${xpCap()})` : ''}, tarefas feitas, sequência de dias e quem está em destaque. O destaque ganha ouro extra à meia-noite.` },
-    { view: 'today', sel: '.today .tasks', title: 'Concluir e desfazer', text: () => 'Toque no quadrado para concluir. Toque no texto da tarefa para ver Editar, Desfazer e Apagar.' },
+    { view: 'today', sel: '.today .tasks', title: 'Concluir e desfazer', text: () => 'Toque no quadrado para concluir. Os botões no fim da linha editam, desfazem e apagam. As tarefas dos outros aparecem para todos, mas só o responsável conclui.' },
     { view: 'hero', tab: 'habilidades', sel: '.tree', title: 'Evoluir', text: () => 'Cada nível dá 1 ponto. Gaste na árvore de habilidades. Dá para refazer tudo de graça ou trocar de classe sem perder o nível. Em Visual você muda a aparência do herói.' },
     { view: 'prizes', ptab: 'loja', sel: '.shop-cats', title: 'Loja', text: () => 'O ouro das batalhas compra equipamentos, poções, roupas e enfeites para o herói.' },
     { view: 'prizes', ptab: 'premios', sel: '.rewards, .view-h', title: 'Prêmios reais', text: () => 'O XP que você ganha vira saldo para pedir prêmios de verdade, combinados com o organizador. A barra mostra quanto falta.' },
@@ -3915,7 +3991,7 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
           <div class="kudos-act">${!mine && S.me && !S.readOnly ? `<button class="btn sm kudos-btn" data-act="askKudos" data-id="${h.id}" ${kudosLeft(h.id) ? '' : 'disabled'}>${kudosGivenTo(h.id) ? 'Elogiado hoje' : kudosLeftN() ? 'Elogiar' : 'Elogios de hoje usados'}</button>` : ''}</div></div></${mine ? 'button' : 'div'}>`);
       } else slots.push(`<div class="slot empty"><div class="fig"><span class="plus">+</span>Vaga livre</div><div class="cl">Vaga ${i + 1} de ${roomSlots()}</div></div>`);
     }
-    return `${bdayBanner()}${eventCard()}${battleBanner()}
+    return `${bdayBanner()}${battleBanner()}${eventCard()}
       <div class="section-t"><h3>A guilda</h3><span class="small muted">${kudosLeftN() ? `Você ainda pode dar ${kudosLeftN()} elogio${kudosLeftN() === 1 ? '' : 's'} hoje.` : 'Seus elogios de hoje já foram dados.'}</span></div>
       <section class="stage"><div class="lineup" style="--n:${roomSlots()}">${slots.join('')}</div></section>
       <div class="grid2">${rankingCard()}${lastBattleCard()}</div>
@@ -3997,9 +4073,9 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
       + (who.length && !t.done ? `<span class="tag who">Para: ${who.map((id) => esc(S.heroes[id].name)).join(', ')}</span>` : '');
     return `<li class="task${t.done ? ' done' : ''}${x.carried ? ' carried' : ''}" style="--c:${d.color}">
       <button class="done-btn" data-act="${blocked ? 'noop' : 'doneBoard'}" data-id="${t.id}" aria-label="${t.done ? 'Cumprida' : 'Cumprir ' + esc(t.title)}" ${blocked ? 'disabled' : ''}${notMine && !t.done ? ` title="Missão de ${esc(who.map((id) => S.heroes[id].name).join(', '))}"` : ''}>${t.done ? '✓' : mine ? '½' : ''}</button>
-      <div class="tbody" data-act="rowOpen" data-id="${t.id}" role="button" tabindex="0" aria-expanded="${S.openRow === t.id}"><div class="t">${esc(t.title)}${boardFaces(t)}</div><div class="sub">${meta}</div></div>
+      <div class="tbody"><div class="t">${esc(t.title)}${boardFaces(t)}</div><div class="sub">${meta}</div></div>
       <div class="xp num">${xpTxt}</div>
-      ${S.openRow === t.id ? `<div class="row-acts">${canUndoBoard(t) ? `<button class="btn sm" data-act="undoBoard" data-id="${t.id}">↺ Desfazer (não fiz)</button>` : canReopen(t) ? `<button class="btn sm" data-act="reopenBoard" data-id="${t.id}">↺ Reabrir (tira o XP de quem cumpriu)</button>` : ''}${!t.done && !parts.length && canMake('tasks') ? `<button class="btn sm" data-act="editTask" data-scope="board" data-id="${t.id}">Editar</button>` : ''}${canMake('tasks') ? `<button class="btn sm ghost danger" data-act="delBoard" data-id="${t.id}" ${S.readOnly ? 'disabled' : ''}>Apagar</button>` : ''}${!(canUndoBoard(t) || canReopen(t) || canMake('tasks')) ? '<span class="small muted">Nada a fazer com esta missão.</span>' : ''}</div>` : ''}</li>`;
+      <div class="ricons">${canUndoBoard(t) ? ricon('undoBoard', t.id, 'undo', 'Desfazer (não fiz)') : canReopen(t) ? ricon('reopenBoard', t.id, 'undo', 'Reabrir (tira o XP de quem cumpriu)') : ''}${!t.done && !parts.length && canMake('tasks') && !S.readOnly ? ricon('editTask', t.id, 'edit', 'Editar', 'data-scope="board"') : ''}${canMake('tasks') && !S.readOnly ? ricon('delBoard', t.id, 'del', 'Apagar') : ''}</div></li>`;
   }
   function boardFilterBar() {
     const hs = heroList(); if (hs.length < 2) return '';
@@ -4169,6 +4245,28 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
       <nav class="tabs" role="tablist">${tabs.map(([k, n]) => `<button role="tab" aria-selected="${curTab === k}" data-act="tab" data-v="${k}">${n}${k === 'habilidades' && h.points ? `<span class="dot">${h.points}</span>` : ''}</button>`).join('')}</nav>${body}`;
   }
   /* ----- Hoje: tudo o que dá para fazer no dia, numa lista só ----- */
+  // Responsável pela tarefa nova: eu (padrão), outros heróis ou qualquer pessoa ('*')
+  function respNow() { const r = (S.resp || []).filter((id) => id === '*' || S.heroes[id]); return r.length ? r : [S.me]; }
+  const respIsMe = () => { const r = respNow(); return r.length === 1 && r[0] === S.me; };
+  function respPicker() {
+    const hs = heroList(); if (hs.length < 2) return '';
+    const r = respNow(); const meH = S.heroes[S.me];
+    const order = [meH].concat(hs.filter((x) => x.id !== S.me)).filter(Boolean);
+    return `<div class="resp" role="group" aria-label="Responsável"><span class="lbl">Responsável</span>
+      ${order.map((x) => `<button type="button" class="resp-chip" data-act="resp" data-v="${x.id}" aria-pressed="${r.includes(x.id)}">${face(x)}<span>${x.id === S.me ? 'Eu' : esc(x.name)}</span></button>`).join('')}
+      <button type="button" class="resp-chip" data-act="resp" data-v="*" aria-pressed="${r.includes('*')}"><span class="wi">✦</span><span>Qualquer pessoa</span></button></div>`;
+  }
+  // tarefas pessoais dos outros heróis: todo mundo vê, só o dono conclui
+  function othersTasks() {
+    const t = today();
+    const blocks = heroList().filter((x) => x.id !== S.me).map((o) => {
+      const ts = (o.tasks || []).filter((x) => (visibleToday(x) && !x.done && !x.pending) || x.done === t);
+      if (!ts.length) return '';
+      const n = ts.filter((x) => !x.done).length;
+      return `<div class="others-h">${face(o)}<span>${esc(o.name)}</span><span class="small muted">${n ? `${n} a fazer` : 'tudo feito'}</span></div><ul class="tasks">${ts.sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0)).map((x) => taskRow(x, o)).join('')}</ul>`;
+    }).join('');
+    return blocks ? `<div class="section-t"><h3>Tarefas dos outros</h3><span class="small muted">Todo mundo vê; só o responsável conclui.</span></div>${blocks}` : '';
+  }
   function todayView(h) {
     ensureHero(h);
     const t = today(); const tasks = h.tasks || [];
@@ -4198,19 +4296,19 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
       ${can ? `<form class="quickadd addtask" data-form="task">
         <div class="qa-row"><input type="text" id="task-title" value="${esc((S.inputs || {})['task-title'] || '')}" maxlength="80" placeholder="O que você vai fazer?" autocomplete="off" aria-label="Nova tarefa"><button class="btn primary" type="submit">Adicionar</button></div>
         <div class="qa-row"><div class="seg" role="group" aria-label="Dificuldade">${diffButtons()}</div><button type="button" class="linkbtn" data-act="moreOpts" aria-expanded="${!!S.moreOpts}">${S.moreOpts ? 'Menos opções' : 'Mais opções'}</button></div>
+        ${respPicker()}
         <div class="qa-more${S.moreOpts ? '' : ' hidden'}">
-          <div class="row"><div class="seg" role="group" aria-label="Para quem"><button type="button" data-act="target" data-v="me" aria-pressed="${S.newTarget !== 'guild'}">Para mim</button><button type="button" data-act="target" data-v="guild" aria-pressed="${S.newTarget === 'guild'}">Para a guilda</button></div>
-            ${S.newTarget === 'guild' ? `<label class="check"><input type="checkbox" id="task-duo" ${S.newDuo ? 'checked' : ''}> Em dupla</label>` : ''}</div>
-          ${S.newTarget === 'guild' ? whoPicker(S.boardWho || [], 'boardWho') : ''}
+          ${respIsMe() ? '' : `<div class="row"><label class="check"><input type="checkbox" id="task-duo" ${S.newDuo ? 'checked' : ''}> Em dupla (dois heróis dividem o XP)</label></div>`}
           ${freqControls(newFreqState(), 'new')}
           <div class="row"><label class="check" for="task-due">Até que horas? <input type="time" id="task-due" class="time-in" value="${esc(S.newDue)}"></label></div>
         </div></form>` : `<div class="perm-note small muted">Nesta sala, ${permNote('tasks')} criam tarefas. As obrigatórias e as missões da guilda aparecem aqui.</div>`}
       ${sec('Obrigatórias', 'definidas pelo organizador', chores.map(taskRow))}
       ${sec('Minhas tarefas', `${D.WEEKDAYS[dowOf(t)]}, ${fmtDay(t)}`, mine.map(taskRow))}
       ${!chores.length && !mine.length ? `<div class="empty-note">${tasks.length ? 'Tudo feito por hoje. A guilda agradece!' : 'Nenhuma tarefa ainda. Escreva acima o que você vai fazer hoje.'}</div>` : ''}
-      <div class="section-t"><h3>Missões da guilda</h3><span class="small muted">Quem cumprir primeiro leva a experiência.</span></div>
+      ${othersTasks()}
+      <div class="section-t"><h3>Missões da guilda</h3><span class="small muted">Tarefas com outro responsável ou para qualquer pessoa. Quem cumprir primeiro leva a experiência.</span></div>
       ${boardFilterBar()}
-      ${bOpen.length ? `<ul class="tasks">${bOpen.map((x) => boardRow(x)).join('')}</ul>` : `<div class="empty-note">${S.boardFilter && S.heroes[S.boardFilter] ? `Nenhuma missão para ${esc(S.heroes[S.boardFilter].name)} hoje.` : 'Nenhuma missão no quadro hoje.'}${can ? ' Em "Mais opções", escolha "Para a guilda" para criar uma.' : ''}</div>`}
+      ${bOpen.length ? `<ul class="tasks">${bOpen.map((x) => boardRow(x)).join('')}</ul>` : `<div class="empty-note">${S.boardFilter && S.heroes[S.boardFilter] ? `Nenhuma missão para ${esc(S.heroes[S.boardFilter].name)} hoje.` : 'Nenhuma missão no quadro hoje.'}${can ? ' Em "Responsável", escolha outra pessoa ou "Qualquer pessoa" para criar uma.' : ''}</div>`}
       ${sec('Aguardando aprovação', 'O XP entra quando um organizador aprovar.', pend.map(taskRow))}
       ${done.length || bDone.length ? `<details class="later" ${S.showDone ? 'open' : ''}><summary data-act="toggleDone">Feitas hoje (${done.length + bDone.length}) <span class="num muted">· +${xpToday} XP</span></summary><ul class="tasks">${done.map(taskRow).join('')}${bDone.map((x) => boardRow(x)).join('')}</ul></details>` : ''}
       ${later.length || bLater.length ? `<details class="later" ${S.showLater ? 'open' : ''}><summary data-act="toggleLater">Agendadas (${later.length + bLater.length})</summary><ul class="tasks">${later.map(taskRow).join('')}${bLater.map((x) => boardRow(x)).join('')}</ul></details>` : ''}
@@ -4265,14 +4363,28 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
   }
   // com o limite diário perto do fim, mostra quanto XP a tarefa ainda dá de verdade
   function capShow(total) { const left = capLeft(S.me && S.heroes[S.me]); if (left >= total) return ''; return `<span title="Limite diário de XP: ${xpCap()}"><s>${total}</s> +${left} XP</span>`; }
-  function taskRow(t) {
+  // botões pequenos, sempre visíveis, no fim da linha da tarefa
+  const RI = {
+    edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>',
+    undo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7H4V2M4.5 7.5A8 8 0 1 1 4 13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    del: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  };
+  const ricon = (act, id, k, label, extra) => `<button type="button" class="ri${k === 'del' ? ' danger' : ''}" data-act="${act}" data-id="${id}" ${extra || ''} title="${label}" aria-label="${label}">${RI[k]}</button>`;
+  function taskRow(t, owner) {
+    // tarefa de outro herói: aparece para todos, mas só o responsável conclui
+    const other = !!owner && typeof owner === 'object' && owner.id !== S.me; // (map passa o índice como 2º argumento)
+    if (other) {
+      const d = D.DIFF[t.diff];
+      return `<li class="task other${t.done ? ' done' : ''}" style="--c:${d.color}"><button class="done-btn" disabled title="Só ${esc(owner.name)} pode concluir" aria-label="Tarefa de ${esc(owner.name)}">${t.done ? '✓' : ''}</button>
+        <div class="tbody"><div class="t">${esc(t.title)}</div><div class="sub"><span>${esc(d.name)}</span>${t.chore ? '<span class="tag">Obrigatória</span>' : ''}${t.done ? '<span>feita hoje</span>' : ''}</div></div><div class="xp num">${t.done ? `+${t.gain || 0} XP` : ''}</div><div class="ricons"></div></li>`;
+    }
     const d = D.DIFF[t.diff]; const x = xpFor(t);
     const xpTxt = t.done ? `+${t.gain != null ? t.gain : x.base} XP` : t.pending ? `${t.pendXp} XP` : capShow(x.total) || (x.total !== x.base ? `<s>${x.base}</s>+${x.total} XP` : `+${x.total} XP`);
     return `<li class="task${t.done ? ' done' : ''}${t.pending ? ' pending' : ''}${x.carried ? ' carried' : ''}" style="--c:${d.color}">
       <button class="done-btn" data-act="${t.done || t.pending ? 'noop' : 'done'}" data-id="${t.id}" aria-label="${t.done ? 'Concluída' : 'Concluir ' + esc(t.title)}" ${S.readOnly || t.done || t.pending ? 'disabled' : ''}>${t.done ? '✓' : t.pending ? '…' : ''}</button>
-      <div class="tbody" data-act="rowOpen" data-id="${t.id}" role="button" tabindex="0" aria-expanded="${S.openRow === t.id}"><div class="t">${esc(t.title)}</div><div class="sub">${taskMeta(t, x)}</div></div>
+      <div class="tbody"><div class="t">${esc(t.title)}</div><div class="sub">${taskMeta(t, x)}</div></div>
       <div class="xp num">${xpTxt}</div>
-      ${S.openRow === t.id ? `<div class="row-acts">${(t.done === today() || t.pending) && !S.readOnly ? `<button class="btn sm" data-act="undoTask" data-id="${t.id}">↺ Desfazer (não fiz)</button>` : ''}${!t.chore && !t.done && !t.pending && canMake('tasks') ? `<button class="btn sm" data-act="editTask" data-scope="me" data-id="${t.id}">Editar</button>` : ''}${t.chore || !canMake('tasks') ? '' : `<button class="btn sm ghost danger" data-act="delTask" data-id="${t.id}" ${S.readOnly ? 'disabled' : ''}>Apagar</button>`}${t.chore && !(t.done === today() || t.pending) ? '<span class="small muted">Tarefa obrigatória: só o organizador muda.</span>' : ''}</div>` : ''}</li>`;
+      <div class="ricons">${(t.done === today() || t.pending) && !S.readOnly ? ricon('undoTask', t.id, 'undo', 'Desfazer (não fiz)') : ''}${!t.chore && !t.done && !t.pending && canMake('tasks') && !S.readOnly ? ricon('editTask', t.id, 'edit', 'Editar', 'data-scope="me"') : ''}${t.chore || !canMake('tasks') || S.readOnly ? '' : ricon('delTask', t.id, 'del', 'Apagar')}</div></li>`;
   }
   function dayChips(sel, act) { return `<div class="days" role="group" aria-label="Dias da semana">${D.WEEKDAYS.map((n, i) => `<button type="button" class="dchip" data-act="${act || 'day'}" data-v="${i}" aria-pressed="${(sel || []).includes(i)}">${n}</button>`).join('')}</div>`; }
   function tasksTab(h) {
@@ -4498,9 +4610,11 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
         <form class="room-cfg" data-form="roomcfg"><div class="field"><label for="room-rename">Nome da sala</label><input type="text" id="room-rename" class="txt" maxlength="40" value="${esc((S.roomMeta && S.roomMeta.name) || '')}"></div>
           <div class="field"><label for="room-slots-cfg">Vagas de heróis</label><select id="room-slots-cfg" class="txt sel">${slotOpts(roomSlots(), Math.max(1, hs.length))}</select><div class="small muted" style="margin-top:4px">${hs.length} ocupada${hs.length === 1 ? '' : 's'}. Para ter menos vagas do que heróis, expulse alguém antes.</div></div>
           <div class="row"><button class="btn sm primary" type="submit">Salvar nome e vagas</button></div></form>
-        <p class="small" style="margin:14px 0 10px">Código para o pessoal entrar: <b class="code-big">${esc(S.room)}</b></p>
-        <div class="row">${canInvite() ? '<button class="btn sm primary" data-act="invite">Link de convite</button>' : ''}<button class="btn sm" data-act="copyCode">Copiar código</button>${hs.length ? '<button class="btn sm ghost" data-act="forceBattle">Prévia da batalha</button>' : ''}</div>
-        <p class="small muted" style="margin:8px 0 0">A prévia mostra como a batalha desta noite terminaria se fosse agora. Não dá recompensa nem muda o estágio.</p></section>
+        ${hs.length ? `<div class="row" style="margin-top:14px"><button class="btn sm ghost" data-act="forceBattle">Prévia da batalha</button></div>
+        <p class="small muted" style="margin:8px 0 0">A prévia mostra como a batalha desta noite terminaria se fosse agora. Não dá recompensa nem muda o estágio.</p>` : ''}</section>
+      <section class="card"><h3>Convidar pessoas</h3>
+        <p class="small" style="margin:0 0 10px">Código para o pessoal entrar: <b class="code-big">${esc(S.room)}</b></p>
+        <div class="row">${canInvite() ? '<button class="btn sm primary" data-act="invite">Link de convite</button>' : ''}<button class="btn sm" data-act="copyCode">Copiar código</button></div></section>
       ${requestsAdmin()}
       <section class="card">${rewardsAdmin(false)}</section>
       <section class="card"><div class="card-h"><h3>Co-organizadores</h3><span class="small muted">Também abrem estas configurações.</span></div>
@@ -4532,10 +4646,10 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
   /* ----- Sala: pendências no topo e quatro grupos que abrem e fecham -----
      Monta a tela a partir dos cartões de configurações, agrupando pelo título de cada um. */
   const SALA_GROUPS = [
-    ['pessoas', 'Pessoas', 'Convidar, heróis, organizadores, quem pode criar, expulsar', ['Heróis da sala', 'Co-organizadores', 'Quem pode criar', 'Heróis importados']],
+    ['pessoas', 'Pessoas', 'Convidar, heróis, organizadores, quem pode criar, expulsar', ['Convidar pessoas', 'Heróis da sala', 'Co-organizadores', 'Quem pode criar', 'Heróis importados']],
     ['regras', 'Regras do jogo', 'Dificuldade, limite de XP, destaque, aprovação, obrigatórias', ['Dificuldade', 'Experiência por dia', 'Aprovação de tarefas', 'Tarefas obrigatórias']],
     ['premios', 'Prêmios', 'O que dá para trocar por XP', ['Prêmios da vida real']],
-    ['seguranca', 'Sala e segurança', 'Nome, vagas, PIN e cópias de segurança', ['Sala', 'PIN das configurações', 'Cópias de segurança']],
+    ['seguranca', 'Sala e segurança', 'Nome, vagas, prévia da batalha, PIN e cópias de segurança', ['Sala', 'PIN das configurações', 'Cópias de segurança']],
   ];
   function settingsLayout(html) {
     if (!/data-sala-root/.test(html)) return html; // tela do PIN ou sem permissão
@@ -5366,6 +5480,12 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
       openReplay({ day: t, stage: st, win: res.win, gold: res.win ? E.goldReward(st) : 0, rounds: res.rounds, log: res.log, units: res.units, preview: true }, true);
     },
     target(el) { S.newTarget = el.dataset.v; render(); },
+    resp(el) {
+      const v = el.dataset.v; let r = respNow();
+      if (v === '*') r = r.includes('*') ? [S.me] : ['*'];
+      else { r = r.filter((x) => x !== '*'); r = r.includes(v) ? r.filter((x) => x !== v) : r.concat(v); }
+      S.resp = r.length ? r : [S.me]; sfx('tap'); render();
+    },
     askRedeem(el) { const h = hero(); const r = S.rewards[el.dataset.id]; if (!r || redeemBal(h) < r.cost) return; S.modal = { type: 'redeem', heroId: h.id, rewardId: r.id }; render(); },
     redeem() {
       const m = S.modal; const h = ensureHero(S.heroes[m.heroId]); const r = S.rewards[m.rewardId]; S.modal = null;
@@ -5583,7 +5703,8 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
     }
     const inp = document.getElementById('task-title'); const title = inp.value.trim(); if (!title) { inp.focus(); return; }
     const due = document.getElementById('task-due').value || null;
-    if (S.newTarget === 'guild') { const duoEl = document.getElementById('task-duo'); addBoardTask(title, null, due, duoEl && duoEl.checked, S.boardWho || []); inp.value = ''; clearInput(inp.id); S.newDue = ''; render(); showToast('<span>Missão fixada no <b>quadro da guilda</b>.</span>'); document.getElementById('task-title').focus(); return; }
+    const rs = respNow();
+    if (!respIsMe()) { const duoEl = document.getElementById('task-duo'); const who = rs.includes('*') ? [] : rs; addBoardTask(title, null, due, duoEl && duoEl.checked, who); S.resp = null; S.newDuo = false; inp.value = ''; clearInput(inp.id); S.newDue = ''; render(); showToast(`<span>Tarefa criada para <b>${rs.includes('*') ? 'qualquer pessoa' : esc(rs.map((id) => id === S.me ? 'você' : S.heroes[id].name).join(' e '))}</b>. Ela aparece em Missões da guilda.</span>`); document.getElementById('task-title').focus(); return; }
     const h = hero(); h.tasks = h.tasks || [];
     if (h.tasks.length >= MAX_TASKS) { showToast(`Limite de ${MAX_TASKS} tarefas. Conclua ou apague algumas.`); return; }
     const fq = freqFields(readNewFreq()); S.newFrom = null;

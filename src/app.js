@@ -208,6 +208,35 @@
     deleteHero(id) { return this.delDoc('heroes/' + id); },
     saveParty(p) { return this.setDoc('party/main', p); },
   };
+  /* ---------------- Conta (login com e-mail e senha, só no servidor próprio) ----------------
+     A conta lembra as salas de que a pessoa participa e qual herói ela usa em cada uma. */
+  const Acct = {
+    saved() { return lsGet('guilda-auth', null); },
+    on() { return !!(Store.server && S.acct); },
+    async call(fn, ...args) { return serverCall('auth_' + fn, ...args); },
+    async load() {
+      const sv = this.saved(); if (!Store.server || !sv || !sv.token) return;
+      try { const r = await this.call('me', sv.token); S.acct = { email: r.email, rooms: r.rooms || [], token: sv.token }; }
+      catch (e) { if (/sess/.test(String(e.message))) lsSet('guilda-auth', null); S.acct = null; }
+    },
+    keep(r) { S.acct = { email: r.email, rooms: r.rooms || [], token: r.token || (S.acct && S.acct.token) }; lsSet('guilda-auth', { token: S.acct.token, email: S.acct.email }); },
+    async enter(kind, email, pass) {
+      S.authErr = ''; S.authBusy = true; render();
+      try { this.keep(await this.call(kind, email, pass)); S.authBusy = false; if (S.room) this.room(); render(); showToast(kind === 'register' ? 'Conta criada. Suas salas ficam salvas nela.' : `Olá! Conectado como <b>${esc(S.acct.email)}</b>.`); }
+      catch (e) { S.authBusy = false; S.authErr = String(e.message || e); render(); }
+    },
+    async logout() { const t = S.acct && S.acct.token; S.acct = null; lsSet('guilda-auth', null); render(); if (t) { try { await this.call('logout', t); } catch (e) { /* ok */ } } },
+    // guarda (ou atualiza) a sala atual na conta, com o herói escolhido nela
+    room(heroId) {
+      if (!this.on() || !S.room) return;
+      const h = heroId === undefined ? (S.me && S.heroes[S.me]) : heroId ? S.heroes[heroId] : null;
+      const info = { code: S.room, name: (S.roomMeta && S.roomMeta.name) || S.room };
+      if (heroId !== undefined || h) { info.hero = h ? h.id : null; info.heroName = h ? h.name : null; }
+      this.call('room', S.acct.token, info).then((r) => { if (S.acct) { S.acct.rooms = r.rooms || []; render(); } }).catch((e) => console.warn('conta', e));
+    },
+    async forget(code) { if (!this.on()) return; try { const r = await this.call('room_del', S.acct.token, code); S.acct.rooms = r.rooms || []; render(); } catch (e) { showToast('Não deu para remover agora.'); } },
+    heroIn(code) { const r = this.on() && S.acct.rooms.find((x) => x.code === code); return r ? r.hero : null; },
+  };
   function afterRemote() { if (!S.ready || !S.room) return; if (S.me && !S.heroes[S.me] && Object.keys(S.heroes).length) { S.me = null; if (['home', 'hero', 'settings'].includes(S.view)) S.view = 'select'; } tidyAll(); maybeShowReport(); render(); processInbox(); }
 
   /* ---------------- Regras ---------------- */
@@ -256,7 +285,7 @@
   }
   // Ajustes diários: tarefas repetidas voltam, tarefas antigas concluídas são removidas
   function tidyTask(task, t) {
-    if (task.repeat && task.done && task.done < t && !task.pending && scheduledOn(task, t)) { Object.assign(task, { done: null, doneBy: null, doneByName: null, created: t, gain: 0, parts: [], partNames: [], pending: null, approved: null }); return 'reset'; }
+    if (task.repeat && task.done && task.done < t && !task.pending && scheduledOn(task, t)) { Object.assign(task, { done: null, doneBy: null, doneByName: null, created: t, gain: 0, parts: [], partNames: [], partGains: [], pending: null, approved: null, punct: null }); return 'reset'; }
     if (!task.repeat && task.done && task.done < t && !task.pending) return 'drop';
     return null;
   }
@@ -274,7 +303,7 @@
     }
     // tarefas obrigatórias definidas pelo criador da sala
     for (const c of choreList()) {
-      if (!choreFor(c, h) || keep.some((x) => x.chore === c.id) || !scheduledOn(c, t)) continue;
+      if (!choreFor(c, h) || keep.some((x) => x.chore === c.id) || !scheduledOn(c, t) || (c.from && t < c.from)) continue;
       keep.push({ id: 'c' + c.id, chore: c.id, title: c.title, diff: c.diff, repeat: true, days: c.days || null, every: c.every || null, start: c.start || null, dom: c.dom || null, due: c.due || null, created: t, done: null, gain: 0 }); changed = true;
     }
     if (changed) h.tasks = keep;
@@ -291,6 +320,8 @@
     }
   }
   function addXp(h, amount) {
+    // XP devolvido por uma tarefa desfeita (quando o herói já tinha gasto esse XP num nível) é descontado primeiro
+    if (h.xpDebt && amount > 0) { const pay = Math.min(h.xpDebt, amount); h.xpDebt -= pay; amount -= pay; }
     h.xp += amount; h.stats.xp = (h.stats.xp || 0) + amount; let ups = 0;
     while (h.xp >= D.xpToNext(h.level)) { h.xp -= D.xpToNext(h.level); h.level++; h.points = (h.points || 0) + 1; ups++; }
     return ups;
@@ -321,24 +352,28 @@
     return '';
   }
   // transforma a escolha do formulário nos campos da tarefa
+  // "from": dia em que a tarefa começa a valer (para "uma vez", o dia agendado). Só guardado se for no futuro.
+  const fromOf = (st) => (st.from && /^\d{4}-\d{2}-\d{2}$/.test(st.from) && st.from > today() ? st.from : null);
   function freqFields(st) {
-    const f = st.freq; const days = (st.days || []).slice().sort();
-    if (f === 'weekly' && days.length && days.length < 7) return { repeat: true, days, every: null, start: null, dom: null };
-    if (f === 'interval') return { repeat: true, days: null, every: Math.max(2, Math.min(90, Math.round(Number(st.every) || 7))), start: st.start || today(), dom: null };
-    if (f === 'monthly') return { repeat: true, days: null, every: null, start: null, dom: Math.max(1, Math.min(31, Math.round(Number(st.dom) || Number(today().slice(8))))) };
-    if (f === 'daily' || f === 'weekly') return { repeat: true, days: null, every: null, start: null, dom: null };
-    return { repeat: false, days: null, every: null, start: null, dom: null };
+    const f = st.freq; const days = (st.days || []).slice().sort(); const from = fromOf(st);
+    if (f === 'weekly' && days.length && days.length < 7) return { repeat: true, days, every: null, start: null, dom: null, from };
+    if (f === 'interval') return { repeat: true, days: null, every: Math.max(2, Math.min(90, Math.round(Number(st.every) || 7))), start: from || st.start || today(), dom: null, from };
+    if (f === 'monthly') return { repeat: true, days: null, every: null, start: null, dom: Math.max(1, Math.min(31, Math.round(Number(st.dom) || Number(today().slice(8))))), from };
+    if (f === 'daily' || f === 'weekly') return { repeat: true, days: null, every: null, start: null, dom: null, from };
+    return { repeat: false, days: null, every: null, start: null, dom: null, from };
   }
   function freqControls(st, pre, noOnce) {
     const opts = [['once', 'Uma vez'], ['daily', 'Todo dia'], ['weekly', 'Dias da semana'], ['interval', 'A cada N dias'], ['monthly', 'Todo mês']].filter(([k]) => !(noOnce && k === 'once'));
     const act = pre === 'ed' ? 'edFreq' : 'freq';
     let sub = '';
     if (st.freq === 'weekly') sub = `${dayChips(st.days, pre === 'ed' ? 'edDay' : 'day')}<span class="small muted">${st.days.length ? freqTxt({ repeat: true, days: st.days }) : 'Marque os dias'}</span>`;
-    if (st.freq === 'interval') sub = `<label class="check" for="${pre}-every">A cada <input type="number" id="${pre}-every" class="time-in num-in" min="2" max="90" value="${esc(st.every || 7)}"> dias, começando hoje</label><span class="small muted">7 = toda semana · 14 = a cada 2 semanas</span>`;
+    if (st.freq === 'interval') sub = `<label class="check" for="${pre}-every">A cada <input type="number" id="${pre}-every" class="time-in num-in" min="2" max="90" value="${esc(st.every || 7)}"> dias</label><span class="small muted">7 = toda semana · 14 = a cada 2 semanas</span>`;
     if (st.freq === 'monthly') sub = `<label class="check" for="${pre}-dom">Todo dia <input type="number" id="${pre}-dom" class="time-in num-in" min="1" max="31" value="${esc(st.dom || Number(today().slice(8)))}"> do mês</label>`;
-    return `<div class="field" style="margin:0"><span class="lbl">Frequência</span><div class="seg wrap" role="group" aria-label="Frequência">${opts.map(([k, n]) => `<button type="button" data-act="${act}" data-v="${k}" aria-pressed="${st.freq === k}">${n}</button>`).join('')}</div>${sub ? `<div class="row" style="margin-top:8px">${sub}</div>` : ''}</div>`;
+    const fv = st.from && st.from > today() ? st.from : today();
+    const when = `<label class="check when" for="${pre}-from">${st.freq === 'once' ? 'Para quando?' : 'Começa em'} <input type="date" id="${pre}-from" class="time-in date-in" min="${today()}" value="${fv}"></label>${fv > today() ? `<span class="small muted">${st.freq === 'once' ? 'Aparece' : 'Começa'} ${D.WEEKDAYS[dowOf(fv)].toLowerCase()}, ${fmtDay(fv)}</span>` : ''}`;
+    return `<div class="field" style="margin:0"><span class="lbl">Frequência</span><div class="seg wrap" role="group" aria-label="Frequência">${opts.map(([k, n]) => `<button type="button" data-act="${act}" data-v="${k}" aria-pressed="${st.freq === k}">${n}</button>`).join('')}</div>${sub ? `<div class="row" style="margin-top:8px">${sub}</div>` : ''}<div class="row" style="margin-top:8px">${when}</div></div>`;
   }
-  const newFreqState = () => ({ freq: S.newFreq, days: S.newDays, every: S.newEvery, dom: S.newDom });
+  const newFreqState = () => ({ freq: S.newFreq, days: S.newDays, every: S.newEvery, dom: S.newDom, from: S.newFrom });
   const visibleToday = (task) => task.done === today() || !!task.pending || (!task.done && dueDay(task) <= today());
   function streakNow(h) { const st = h && h.streak; if (!st || !st.last) return 0; const t = today(); if (st.last === t) return st.n; if (st.last === addDays(t, -1)) return st.n; return 0; }
   function streakBonusNext(h) { const st = h && h.streak; if (!st || !st.last) return 0; const t = today(); const n = st.last === t ? st.n : st.last === addDays(t, -1) ? st.n + 1 : 1; return Math.min(D.STREAK_MAX, D.STREAK_STEP * (n - 1)); }
@@ -362,10 +397,27 @@
   // marca o dia como ativo (sequência) quando o herói cumpre algo
   function markDay(h) {
     ensureHero(h); const t = today(); const st = h.streak;
-    if (st.last !== t) { st.n = st.last === addDays(t, -1) ? st.n + 1 : 1; st.last = t; st.best = Math.max(st.best || 0, st.n); }
+    if (st.last !== t) { h.streakPrev = { day: t, n: st.n || 0, last: st.last || null, best: st.best || 0 }; st.n = st.last === addDays(t, -1) ? st.n + 1 : 1; st.last = t; st.best = Math.max(st.best || 0, st.n); }
     if (dowOf(t) === 0 && h.log[addDays(t, -1)] && h.log[addDays(t, -1)].t) h.stats.weekend = true;
   }
   function grantXp(h, amount) { ensureHero(h); const ups = addXp(h, amount); logDay(h, 'x', amount); return ups; }
+  /* ----- Desfazer uma tarefa concluída hoje ----- */
+  // tira o XP sem nunca tirar um nível já conquistado: o que faltar vira "dívida" paga pelas próximas tarefas
+  function removeXp(h, amount) {
+    ensureHero(h); amount = Math.max(0, Math.round(amount || 0)); if (!amount) return;
+    h.stats.xp = Math.max(0, (h.stats.xp || 0) - amount);
+    const take = Math.min(h.xp || 0, amount); h.xp -= take; if (amount > take) h.xpDebt = (h.xpDebt || 0) + (amount - take);
+    logDay(h, 'x', -amount);
+  }
+  // desfaz a contagem do dia; se era a única tarefa de hoje, a sequência volta a ser como antes
+  function unmarkDay(h, diff) {
+    ensureHero(h); const t = today();
+    h.stats.done = Math.max(0, (h.stats.done || 0) - 1);
+    if (diff && h.stats.byDiff && h.stats.byDiff[diff]) h.stats.byDiff[diff] = Math.max(0, h.stats.byDiff[diff] - 1);
+    logDay(h, 't', -1);
+    const lg = h.log[t]; if (lg && lg.t < 0) lg.t = 0;
+    if ((!lg || !lg.t) && h.streak.last === t && h.streakPrev && h.streakPrev.day === t) { h.streak.n = h.streakPrev.n; h.streak.last = h.streakPrev.last; h.streak.best = h.streakPrev.best; }
+  }
   function checkAch(h) {
     ensureHero(h); const got = [];
     for (const a of D.ACH) if (!h.ach[a.id] && a.test(h, { party: S.party })) { h.ach[a.id] = today(); h.bonusGold = (h.bonusGold || 0) + a.gold; got.push(a); }
@@ -740,7 +792,7 @@
     const title = (S.roomMeta && S.roomMeta.name) || 'Guilda da Família';
     const back = ['hero', 'create', 'settings', 'bestiary', 'report'].includes(S.view) && S.me ? `<button class="back" data-act="home">← Salão</button>` : '';
     return `<header class="topbar"><div class="brand">${back}<h1>${esc(inRoom ? title : 'Guilda da Família')}</h1></div>
-      ${inRoom ? `<div class="chips"><span class="chip">Sala <b class="num">${esc(S.room)}</b></span>${S.party && S.view !== 'select' ? `<span class="chip">Estágio <b class="num">${stage()}</b> · ${esc(E.regionOf(stage()).name)}</span><span class="chip warn">Batalha à meia-noite · <b class="num">${countdown()}</b></span>` : ''}</div>` : ''}</header>
+      ${inRoom ? `<div class="chips">${Acct.on() && S.acct.rooms.length > 1 ? `<label class="chip room-sw"><span class="sr-only">Trocar de sala</span><select id="room-switch" aria-label="Trocar de sala">${S.acct.rooms.map((r) => `<option value="${esc(r.code)}" ${r.code === S.room ? 'selected' : ''}>${esc(r.name || r.code)} · ${esc(r.code)}</option>`).join('')}</select></label>` : `<span class="chip">Sala <b class="num">${esc(S.room)}</b></span>`}${S.party && S.view !== 'select' ? `<span class="chip">Estágio <b class="num">${stage()}</b> · ${esc(E.regionOf(stage()).name)}</span><span class="chip warn">Batalha à meia-noite · <b class="num">${countdown()}</b></span>` : ''}</div>` : ''}</header>
       ${inRoom ? `<div class="sessbar">${me ? `<span class="who">${A.heroSvg(me, { noPet: true, noWeapon: true })}<span>Jogando como <b>${esc(me.name)}</b> ${roleTag(me)}</span></span>` : '<span class="muted">Escolha seu personagem</span>'}
         <span class="spacer"></span><button class="btn sm ghost" data-act="toggleSound" aria-pressed="${Sound.on}">${Sound.on ? 'Som ligado' : 'Som desligado'}</button>${me ? '<button class="btn sm ghost" data-act="tutorial">Tutorial</button>' : ''}${isCreator() && S.view !== 'settings' ? `<button class="btn sm" data-act="settings">Configurações${adminBadge() ? `<span class="dot">${adminBadge()}</span>` : ''}</button>` : ''}${me ? `<button class="btn sm ghost" data-act="switchHero">Trocar personagem</button>` : ''}<button class="btn sm ghost" data-act="leaveRoom">Sair da sala</button></div>` : ''}`;
   }
@@ -750,6 +802,7 @@
     const last = lsGet('guilda-last-room', null);
     return `<section class="gate"><div class="gate-hero"><div class="eyebrow">Tarefas da família viram aventura</div><h2>Entre na sala da sua guilda</h2>
       <p class="muted">Cada sala é uma guilda separada, com até 5 heróis. Quem cria a sala recebe um código para passar para a família.</p></div>
+      ${accountCard()}
       <div class="grid2"><form class="card" data-form="join"><div class="eyebrow">Já tenho um código</div><h3>Entrar numa sala</h3>
         <div class="field" style="margin-top:12px"><label for="room-code">Código da sala</label><input type="text" id="room-code" class="code-in" maxlength="6" placeholder="ABC123" autocomplete="off" autocapitalize="characters" value="${esc(S.joinDraft || '')}"></div>
         ${S.roomErr ? `<p class="small" style="color:var(--bad);margin-top:-8px">${esc(S.roomErr)}</p>` : ''}
@@ -758,6 +811,23 @@
         <div class="field" style="margin-top:12px"><label for="room-name">Nome da guilda</label><input type="text" id="room-name" value="${esc((S.inputs || {})["room-name"] || "")}" maxlength="28" placeholder="Guilda da Família" autocomplete="off"></div>
         <p class="small muted" style="margin-top:-6px">O primeiro herói criado na sala vira o criador e controla as configurações.</p>
         <button class="btn primary" type="submit">Criar sala</button></form></div></section>`;
+  }
+  function accountCard() {
+    if (!Store.server) return '';
+    if (!S.acct) {
+      return `<section class="card acct-card"><div class="card-h"><div><div class="eyebrow">Conta (opcional)</div><h3>Entrar com e-mail</h3></div><span class="small muted">Com uma conta, todas as suas salas ficam reunidas e você troca entre elas num toque, em qualquer aparelho.</span></div>
+        <form class="acct-form" data-form="login">
+          <div class="field"><label for="acct-email">E-mail</label><input type="email" id="acct-email" autocomplete="username" maxlength="120" placeholder="voce@exemplo.com" value="${esc((S.inputs || {})['acct-email'] || '')}"></div>
+          <div class="field"><label for="acct-pass">Senha</label><input type="password" id="acct-pass" autocomplete="current-password" maxlength="200" placeholder="Pelo menos 6 caracteres"></div>
+          ${S.authErr ? `<p class="small" style="color:var(--bad);margin:0">${esc(S.authErr)}</p>` : ''}
+          <div class="row"><button class="btn primary" type="submit" ${S.authBusy ? 'disabled' : ''}>Entrar</button><button class="btn ghost" type="button" data-act="register" ${S.authBusy ? 'disabled' : ''}>Criar conta</button></div>
+        </form></section>`;
+    }
+    const rooms = S.acct.rooms || [];
+    return `<section class="card acct-card"><div class="card-h"><div><div class="eyebrow">Minhas salas</div><h3>${esc(S.acct.email)}</h3></div><span class="row" style="gap:6px"><button class="btn sm ghost" data-act="showLogin">${S.passOpen ? 'Fechar' : 'Trocar senha'}</button><button class="btn sm ghost" data-act="logout">Sair da conta</button></span></div>
+      ${S.passOpen ? `<form class="acct-form" data-form="pass" style="margin-top:10px"><div class="field"><label for="pass-old">Senha atual</label><input type="password" id="pass-old" autocomplete="current-password"></div><div class="field"><label for="pass-new">Senha nova</label><input type="password" id="pass-new" autocomplete="new-password" placeholder="Pelo menos 6 caracteres"></div>${S.authErr ? `<p class="small" style="color:var(--bad);margin:0">${esc(S.authErr)}</p>` : ''}<div class="row"><button class="btn primary" type="submit">Salvar senha nova</button></div></form>` : ''}
+      ${rooms.length ? `<ul class="my-rooms">${rooms.map((r) => `<li><button class="room-go" data-act="goRoom" data-code="${esc(r.code)}"><b>${esc(r.name || r.code)}</b><span class="small muted">Sala ${esc(r.code)}${r.heroName ? ' · ' + esc(r.heroName) : ''}</span></button><button class="del" data-act="forgetRoom" data-code="${esc(r.code)}" title="Tirar da lista" aria-label="Tirar ${esc(r.name || r.code)} da lista">×</button></li>`).join('')}</ul>`
+        : '<p class="small muted" style="margin:10px 0 0">Nenhuma sala ainda. Entre com um código ou crie uma sala: ela fica guardada aqui.</p>'}</section>`;
   }
   /* ----- Escolha do personagem ----- */
   function selectView() {
@@ -827,6 +897,18 @@
       <label class="who-item any${!sel.length ? ' on' : ''}"><input type="checkbox" data-act="${act}" value="" ${!sel.length ? 'checked' : ''}><span class="wi">✦</span><span>Qualquer herói</span></label>
       ${hs.map((h) => { const on = sel.includes(h.id); return `<label class="who-item${on ? ' on' : ''}"><input type="checkbox" data-act="${act}" value="${h.id}" ${on ? 'checked' : ''}><span class="wi">${A.heroSvg(h, { noPet: true, noWeapon: true })}</span><span>${esc(h.name)}</span></label>`; }).join('')}</div></div>`;
   }
+  // retratinho redondo do herói (rosto)
+  const face = (h, cls) => `<span class="face${cls ? ' ' + cls : ''}" title="${esc(h.name)}">${A.heroSvg(h, { noPet: true, noWeapon: true })}</span>`;
+  function boardFaces(t) {
+    const who = whoOf(t); const hs = who.length ? who.map((id) => S.heroes[id]) : heroList();
+    if (!hs.length) return '';
+    const doers = t.done ? (t.parts && t.parts.length ? t.parts : [t.doneBy]) : (t.parts || []);
+    return `<span class="faces${who.length ? '' : ' any'}" title="${who.length ? 'Responsáveis: ' + esc(hs.map((h) => h.name).join(', ')) : 'Qualquer herói'}">${hs.map((h) => face(h, doers.includes(h.id) ? 'did' : '')).join('')}</span>`;
+  }
+  const boardFuture = (t) => !t.done && dueDay(t) > today();
+  const boardFilterOk = (t) => { const f = S.boardFilter; if (!f || !S.heroes[f]) return true; const w = whoOf(t); return !w.length || w.includes(f); };
+  // pode desfazer: missão que eu cumpri hoje (ou minha parte numa dupla)
+  const canUndoBoard = (t) => !!S.me && !S.readOnly && ((t.done === today() && (t.doneBy === S.me || (t.parts || []).includes(S.me))) || (!t.done && (t.parts || []).includes(S.me)));
   const toggleWho = (list, v) => (v === '' ? [] : list.includes(v) ? list.filter((x) => x !== v) : list.concat(v));
   function boardRow(t) {
     const d = D.DIFF[t.diff]; const x = xpFor(t);
@@ -834,8 +916,8 @@
     const parts = t.parts || []; const mine = S.me && parts.includes(S.me);
     const share = t.duo ? Math.round(x.total * D.DUO_SHARE) : x.total;
     const xpTxt = t.done ? `+${t.gain || x.base} XP` : t.duo ? `+${share} XP cada` : x.total !== x.base ? `<s>${x.base}</s>+${x.total} XP` : `+${x.total} XP`;
-    const who = whoOf(t); const notMine = !!S.me && !canDoBoard(t, S.me);
-    const blocked = S.readOnly || !!t.done || mine || notMine;
+    const who = whoOf(t); const notMine = !!S.me && !canDoBoard(t, S.me); const future = boardFuture(t);
+    const blocked = S.readOnly || !!t.done || mine || notMine || future;
     const meta = taskMeta(Object.assign({}, t, { pending: null }), x)
       + (t.duo ? `<span class="tag duo">Em dupla${parts.length === 1 && !t.done ? ` · ${esc(t.partNames && t.partNames[0] || '')} já fez a parte` : ''}</span>` : '')
       + (t.pending ? '<span class="tag wait">Aguardando aprovação</span>' : '')
@@ -843,20 +925,29 @@
       + (who.length && !t.done ? `<span class="tag who">Para: ${who.map((id) => esc(S.heroes[id].name)).join(', ')}</span>` : '');
     return `<li class="task${t.done ? ' done' : ''}${x.carried ? ' carried' : ''}" style="--c:${d.color}">
       <button class="done-btn" data-act="${blocked ? 'noop' : 'doneBoard'}" data-id="${t.id}" aria-label="${t.done ? 'Cumprida' : 'Cumprir ' + esc(t.title)}" ${blocked ? 'disabled' : ''}${notMine && !t.done ? ` title="Missão de ${esc(who.map((id) => S.heroes[id].name).join(', '))}"` : ''}>${t.done ? '✓' : mine ? '½' : ''}</button>
-      <div><div class="t">${esc(t.title)}</div><div class="sub">${meta}</div></div>
+      <div><div class="t">${esc(t.title)}${boardFaces(t)}</div><div class="sub">${meta}</div></div>
       <div class="xp num">${xpTxt}</div>
-      <div class="tact">${!t.done && !parts.length ? `<button class="del" data-act="editTask" data-scope="board" data-id="${t.id}" aria-label="Editar missão" title="Editar">✎</button>` : ''}<button class="del" data-act="delBoard" data-id="${t.id}" aria-label="Apagar missão" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button></div></li>`;
+      <div class="tact">${canUndoBoard(t) ? `<button class="del undo" data-act="undoBoard" data-id="${t.id}" aria-label="Desfazer: ${esc(t.title)}" title="Desfazer (não fiz)">↺</button>` : ''}${!t.done && !parts.length ? `<button class="del" data-act="editTask" data-scope="board" data-id="${t.id}" aria-label="Editar missão" title="Editar">✎</button>` : ''}<button class="del" data-act="delBoard" data-id="${t.id}" aria-label="Apagar missão" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button></div></li>`;
+  }
+  function boardFilterBar() {
+    const hs = heroList(); if (hs.length < 2) return '';
+    const f = S.boardFilter && S.heroes[S.boardFilter] ? S.boardFilter : '';
+    return `<div class="board-filter" role="group" aria-label="Filtrar missões por herói"><span class="small muted">Ver missões de</span>
+      <button type="button" class="who-item any${!f ? ' on' : ''}" data-act="boardFilter" data-v="" aria-pressed="${!f}"><span class="wi">✦</span><span>Todos</span></button>
+      ${hs.map((h) => `<button type="button" class="who-item${f === h.id ? ' on' : ''}" data-act="boardFilter" data-v="${h.id}" aria-pressed="${f === h.id}"><span class="wi">${A.heroSvg(h, { noPet: true, noWeapon: true })}</span><span>${esc(h.name)}</span></button>`).join('')}</div>`;
   }
   function boardCard() {
-    const t = today(); const all = boardList();
-    const open = all.filter((x) => !x.done); const done = all.filter((x) => x.done === t);
+    const t = today(); const all = boardList().filter(boardFilterOk);
+    const open = all.filter((x) => !x.done && !boardFuture(x)); const done = all.filter((x) => x.done === t); const later = all.filter(boardFuture);
     return `<section class="card board" style="margin-bottom:18px"><div class="card-h"><div><div class="eyebrow">Quadro da guilda</div><h3>Missões da guilda</h3></div><span class="small muted">Escolha os responsáveis ou deixe para qualquer herói. Quem cumprir primeiro leva a experiência.</span></div>
       <form class="addtask" data-form="board"><div class="row"><input type="text" id="board-title" value="${esc((S.inputs || {})["board-title"] || "")}" maxlength="80" placeholder="Ex.: Tirar o lixo, passear com o cachorro, regar as plantas" autocomplete="off" style="flex:1;min-width:200px" ${S.readOnly ? 'disabled' : ''}>
         <button class="btn primary" type="submit" ${S.readOnly ? 'disabled' : ''}>Fixar no quadro</button></div>
         <div class="row"><div class="seg" role="group" aria-label="Dificuldade">${diffButtons()}</div><label class="check"><input type="checkbox" id="board-duo" ${S.newDuo ? 'checked' : ''}> Em dupla</label></div>
         ${whoPicker(S.boardWho || [], 'boardWho')}
         ${freqControls(newFreqState(), 'new')}<div class="row"><label class="check" for="board-due">Até que horas? <input type="time" id="board-due" class="time-in" value="${esc(S.newDue)}"></label></div></form>
-      ${open.length || done.length ? `<ul class="tasks" style="margin-top:14px">${open.concat(done).map((x) => boardRow(x)).join('')}</ul>` : `<div class="empty-note" style="margin-top:14px">Nenhuma missão no quadro. Tarefas da casa que qualquer um pode fazer ficam aqui.</div>`}</section>`;
+      ${boardFilterBar()}
+      ${open.length || done.length ? `<ul class="tasks" style="margin-top:14px">${open.concat(done).map((x) => boardRow(x)).join('')}</ul>` : `<div class="empty-note" style="margin-top:14px">${S.boardFilter && S.heroes[S.boardFilter] ? `Nenhuma missão para ${esc(S.heroes[S.boardFilter].name)} hoje.` : 'Nenhuma missão no quadro. Tarefas da casa que qualquer um pode fazer ficam aqui.'}</div>`}
+      ${later.length ? `<details class="later" ${S.showBoardLater ? 'open' : ''}><summary data-act="toggleBoardLater">Agendadas (${later.length})</summary><ul class="tasks">${later.map((x) => boardRow(x)).join('')}</ul></details>` : ''}</section>`;
   }
   function diffButtons() { return Object.values(D.DIFF).map((d) => `<button type="button" style="--c:${d.color}" data-act="diff" data-v="${d.id}" aria-pressed="${S.newDiff === d.id}">${d.name} · ${d.xp}</button>`).join(''); }
   // destaque do salão: o desafio da noite, com cenário, inimigos e dificuldade
@@ -1000,7 +1091,7 @@
     return `<section class="hero-head"><div class="fig"><div class="idle">${A.heroSvg(h)}</div>${kudosStrip(h.id)}</div><div>
       <div class="eyebrow" style="color:${c.color}">${ancOf(h).name} · ${c.name} · ${c.role}</div><h2>${esc(h.name)}</h2>
       <div class="meta"><span class="chip">Nível <b class="num">${h.level}</b></span><span class="chip"><span class="coin"></span> <b class="num">${goldOf(h)}</b> ouro</span>${h.potion && h.potion.day === today() ? `<span class="chip warn">${esc((D.POTIONS.find((x) => x.id === h.potion.id) || {}).name || 'Poção')} esta noite</span>` : ''}${festaOf(h) ? `<span class="chip festa-chip"><span class="coin festa"></span> <b class="num">${festaOf(h)}</b> de festa</span>` : ''}<span class="chip"><span class="gem"></span> <b class="num">${redeemBal(h)}</b> XP de resgate</span>${streakNow(h) ? `<span class="chip streakchip"><b class="num">${streakNow(h)}</b> dia${streakNow(h) > 1 ? 's' : ''} seguido${streakNow(h) > 1 ? 's' : ''}</span>` : ''}${h.points ? `<span class="chip warn"><b class="num">${h.points}</b> ponto${h.points > 1 ? 's' : ''} de habilidade</span>` : ''}<span class="chip">Poder de combate <b class="num">${E.powerScore(E.heroStats(Object.assign({}, h, { bday: bdayBuffOn(h), potion: h.potion && h.potion.day === today() ? h.potion.id : null })))}</b></span></div>
-      <div class="xpline"><span>Experiência</span><span class="num"><b>${h.xp}</b> / ${need} para o nível ${h.level + 1}</span></div><div class="bar"><i style="width:${Math.round((h.xp / need) * 100)}%"></i></div></div></section>
+      <div class="xpline"><span>Experiência</span><span class="num"><b>${h.xp}</b> / ${need} para o nível ${h.level + 1}${h.xpDebt ? ` <span class="muted" title="XP de tarefas desfeitas depois que o nível já tinha subido. As próximas tarefas pagam primeiro.">· −${h.xpDebt} a repor</span>` : ''}</span></div><div class="bar"><i style="width:${Math.round((h.xp / need) * 100)}%"></i></div></div></section>
       <nav class="tabs" role="tablist">${tabs.map(([k, n]) => `<button role="tab" aria-selected="${S.tab === k}" data-act="tab" data-v="${k}">${n}${k === 'habilidades' && h.points ? `<span class="dot">${h.points}</span>` : ''}${k === 'recompensas' && rewardList().some((r) => r.cost <= redeemBal(h)) ? '<span class="dot">!</span>' : ''}</button>`).join('')}</nav>${body}`;
   }
   const daysTxt = (days) => days && days.length && days.length < 7 ? days.slice().sort().map((d) => D.WEEKDAYS[d]).join(', ') : '';
@@ -1009,7 +1100,10 @@
     if (t.chore) bits.push('<span class="tag must">Obrigatória</span>');
     bits.push(`<span style="color:${D.DIFF[t.diff].color}">${D.DIFF[t.diff].name}</span>`);
     if (freqTxt(t)) bits.push(`<span class="freq">${freqTxt(t)}</span>`);
-    if (!visibleToday(t) && !t.done && (t.repeat || hasSchedule(t))) { const n = nextOn(t, dueDay(t) > today() ? dueDay(t) : addDays(today(), 1)); if (n) bits.push(`<span>Próxima: ${D.WEEKDAYS[dowOf(n)].toLowerCase()}, ${fmtDay(n)}</span>`); }
+    if (!visibleToday(t) && !t.done) {
+      if (t.repeat || hasSchedule(t)) { const n = nextOn(t, dueDay(t) > today() ? dueDay(t) : addDays(today(), 1)); if (n) bits.push(`<span class="tag sched">${dueDay(t) > today() && t.from ? 'Começa' : 'Próxima'}: ${D.WEEKDAYS[dowOf(n)].toLowerCase()}, ${fmtDay(n)}</span>`); }
+      else if (dueDay(t) > today()) bits.push(`<span class="tag sched">Agendada: ${D.WEEKDAYS[dowOf(dueDay(t))].toLowerCase()}, ${fmtDay(dueDay(t))}</span>`);
+    }
     if (t.due && !t.done) bits.push(x.late ? `<span class="tag late">Passou das ${t.due}</span>` : x.punctual ? `<span class="tag ontime">Até ${t.due}: +${Math.round(D.PUNCTUAL_BONUS * 100)}%</span>` : `<span>Até ${t.due}</span>`);
     if (x.carried) bits.push(`<span class="bonus">Acumulada +${Math.round(D.CARRY_BONUS * 100)}%</span>`);
     if (x.streak && !t.done) bits.push(`<span class="tag streak">Sequência +${Math.round(x.streak * 100)}%</span>`);
@@ -1025,7 +1119,7 @@
       <button class="done-btn" data-act="${t.done || t.pending ? 'noop' : 'done'}" data-id="${t.id}" aria-label="${t.done ? 'Concluída' : 'Concluir ' + esc(t.title)}" ${S.readOnly || t.done || t.pending ? 'disabled' : ''}>${t.done ? '✓' : t.pending ? '…' : ''}</button>
       <div><div class="t">${esc(t.title)}</div><div class="sub">${taskMeta(t, x)}</div></div>
       <div class="xp num">${xpTxt}</div>
-      <div class="tact">${!t.chore && !t.done && !t.pending ? `<button class="del" data-act="editTask" data-scope="me" data-id="${t.id}" aria-label="Editar tarefa" title="Editar">✎</button>` : ''}${t.chore ? '' : `<button class="del" data-act="delTask" data-id="${t.id}" aria-label="Apagar tarefa" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button>`}</div></li>`;
+      <div class="tact">${(t.done === today() || t.pending) && !S.readOnly ? `<button class="del undo" data-act="undoTask" data-id="${t.id}" aria-label="Desfazer: ${esc(t.title)}" title="Desfazer (não fiz)">↺</button>` : ''}${!t.chore && !t.done && !t.pending ? `<button class="del" data-act="editTask" data-scope="me" data-id="${t.id}" aria-label="Editar tarefa" title="Editar">✎</button>` : ''}${t.chore ? '' : `<button class="del" data-act="delTask" data-id="${t.id}" aria-label="Apagar tarefa" title="Apagar" ${S.readOnly ? 'disabled' : ''}>×</button>`}</div></li>`;
   }
   function dayChips(sel, act) { return `<div class="days" role="group" aria-label="Dias da semana">${D.WEEKDAYS.map((n, i) => `<button type="button" class="dchip" data-act="${act || 'day'}" data-v="${i}" aria-pressed="${(sel || []).includes(i)}">${n}</button>`).join('')}</div>`; }
   function tasksTab(h) {
@@ -1039,7 +1133,7 @@
     const later = tasks.filter((x) => !visibleToday(x) && !x.done);
     const xpToday = done.reduce((s2, x) => s2 + (x.gain || 0), 0);
     const ch = chestState(h); const sn = streakNow(h);
-    const bo = boardList().filter((x) => !x.done || x.done === t);
+    const bo = boardList().filter((x) => (!x.done && !boardFuture(x)) || x.done === t);
     return `<div class="grid2"><div>
       ${bdayCta(h)}
       ${ch.ready ? `<section class="chest-cta"><div class="chest-ic">${chestSvg(false)}</div><div><b>Baú do dia liberado!</b><div class="small">Você cumpriu todas as tarefas de hoje.</div></div><button class="btn primary" data-act="openChest">Abrir baú</button></section>`
@@ -1232,7 +1326,7 @@
           <div class="field" style="margin:0"><span class="lbl">Para quem</span><div class="opts"><label class="check"><input type="radio" name="chore-who" value="all" ${S.choreAssign === 'all' ? 'checked' : ''} data-act="choreWho"> Todos os heróis</label><label class="check"><input type="radio" name="chore-who" value="some" ${S.choreAssign !== 'all' ? 'checked' : ''} data-act="choreWho"> Escolher</label></div>
           ${S.choreAssign !== 'all' ? `<div class="opts" style="margin-top:8px">${hs.map((h) => `<label class="check"><input type="checkbox" class="chore-h" value="${h.id}"> ${esc(h.name)}</label>`).join('')}</div>` : ''}</div>
           <div class="row"><button class="btn primary" type="submit">Adicionar obrigatória</button></div></form>
-        ${choreList().length ? `<ul class="hist" style="margin-top:12px">${choreList().map((c) => `<li><span><b>${esc(c.title)}</b> <span class="small muted">· ${D.DIFF[c.diff].name} · ${freqTxt(Object.assign({ chore: true }, c))}${c.due ? ' · até ' + c.due : ''} · ${esc(assignTxt(c))}</span></span><span class="row" style="gap:6px"><button class="btn sm ghost" data-act="editTask" data-scope="chore" data-id="${c.id}">Editar</button><button class="btn sm ghost" data-act="delChore" data-id="${c.id}">Remover</button></span></li>`).join('')}</ul>` : '<p class="small muted" style="margin:10px 0 0">Nenhuma tarefa obrigatória.</p>'}</section>
+        ${choreList().length ? `<ul class="hist" style="margin-top:12px">${choreList().map((c) => `<li><span><b>${esc(c.title)}</b> <span class="small muted">· ${D.DIFF[c.diff].name} · ${freqTxt(Object.assign({ chore: true }, c))}${c.from && c.from > today() ? ' · a partir de ' + fmtDay(c.from) : ''}${c.due ? ' · até ' + c.due : ''} · ${esc(assignTxt(c))}</span></span><span class="row" style="gap:6px"><button class="btn sm ghost" data-act="editTask" data-scope="chore" data-id="${c.id}">Editar</button><button class="btn sm ghost" data-act="delChore" data-id="${c.id}">Remover</button></span></li>`).join('')}</ul>` : '<p class="small muted" style="margin:10px 0 0">Nenhuma tarefa obrigatória.</p>'}</section>
       </div><div>
       ${requestsAdmin()}
       <section class="card">${rewardsAdmin(false)}</section>
@@ -1692,10 +1786,52 @@
   function saveCur(h) { Store.saveHero(h); render(); }
   const actions = {
     home() { S.view = S.me ? 'home' : 'select'; S.heroId = null; S.diffPreview = null; render(); scrollTo(0, 0); },
-    pickMe(el) { S.toast = null; S.me = el.dataset.id; lsSet('guilda-me:' + S.room, S.me); S.masterOk = false; S.view = 'home'; tidyAll(); render(); scrollTo(0, 0); maybeShowReport(); processInbox(); },
+    pickMe(el) { S.toast = null; S.me = el.dataset.id; lsSet('guilda-me:' + S.room, S.me); S.masterOk = false; Acct.room(S.me); S.view = 'home'; tidyAll(); render(); scrollTo(0, 0); maybeShowReport(); processInbox(); },
     switchHero() { S.toast = null; S.me = null; lsSet('guilda-me:' + S.room, null); S.masterOk = false; S.view = 'select'; render(); scrollTo(0, 0); },
     leaveRoom() { Store.close(); S.me = null; S.roomMeta = null; S.masterOk = false; applyDocs({}); S.view = 'rooms'; S.roomErr = ''; render(); scrollTo(0, 0); },
     joinLast() { enterRoom(lsGet('guilda-last-room', '')); },
+    undoTask(el) {
+      const h = ensureHero(hero()); const t = (h.tasks || []).find((x) => x.id === el.dataset.id); if (!t) return;
+      if (t.pending) {
+        t.pending = null; t.pendXp = 0; unmarkDay(h, t.diff); S.undo = null; saveCur(h);
+        showToast(`<span>Envio cancelado · <b>${esc(t.title)}</b> voltou para a lista.</span>`); return;
+      }
+      if (t.done !== today()) return;
+      const gain = t.gain || 0;
+      removeXp(h, gain); unmarkDay(h, t.diff); if (t.wasPunctual) h.stats.punctual = Math.max(0, (h.stats.punctual || 0) - 1);
+      Object.assign(t, { done: null, gain: 0, wasPunctual: null });
+      S.undo = null; saveCur(h);
+      post('undo', `${h.name} desfez "${t.title}"`);
+      showToast(`<span>Desfeita · <b>${esc(t.title)}</b>${gain ? ` · −${gain} XP` : ''}</span>`);
+    },
+    undoBoard(el) {
+      const t = S.board[el.dataset.id]; if (!t || !canUndoBoard(t) || !S.heroes[S.me]) return;
+      const h = ensureHero(S.heroes[S.me]); const me = h.id;
+      const b = clone(t); const parts = b.parts || []; let gain = 0;
+      if (b.duo && parts.includes(me)) {
+        const i = parts.indexOf(me);
+        gain = (b.partGains && b.partGains[i]) || (b.done ? b.gain : Math.round(xpCalc(b, h).total * D.DUO_SHARE)) || 0;
+        b.parts = parts.filter((x) => x !== me); b.partNames = (b.partNames || []).filter((_, k) => k !== i); b.partGains = (b.partGains || []).filter((_, k) => k !== i);
+        Object.assign(b, { done: null, doneBy: null, doneByName: null, gain: 0, pending: null });
+        h.stats.duo = Math.max(0, (h.stats.duo || 0) - 1); h.stats.board = Math.max(0, (h.stats.board || 0) - 1);
+        removeXp(h, gain); unmarkDay(h, null);
+      } else {
+        const wasPending = !!b.pending; gain = wasPending ? 0 : b.gain || 0;
+        Object.assign(b, { done: null, doneBy: null, doneByName: null, gain: 0, pending: null, approved: null, punct: null });
+        if (!wasPending) { h.stats.board = Math.max(0, (h.stats.board || 0) - 1); if (t.punct) h.stats.punctual = Math.max(0, (h.stats.punctual || 0) - 1); removeXp(h, gain); }
+        unmarkDay(h, t.diff);
+      }
+      Store.setDoc('board/' + b.id, b); S.undo = null; Store.saveHero(h);
+      post('undo', `${h.name} desfez a missão "${t.title}"`);
+      showToast(`<span>Missão desfeita · <b>${esc(t.title)}</b>${gain ? ` · −${gain} XP` : ''}</span>`); render();
+    },
+    boardFilter(el) { S.boardFilter = el.dataset.v || null; render(); },
+    toggleBoardLater() { S.showBoardLater = !S.showBoardLater; },
+    goRoom(el) { if (el.dataset.code === S.room && S.view !== 'rooms') return; enterRoom(el.dataset.code); },
+    forgetRoom(el) { Acct.forget(el.dataset.code); },
+    register() { const e = document.getElementById('acct-email'), p = document.getElementById('acct-pass'); if (!e.value.trim()) { e.focus(); return; } if (!p.value) { p.focus(); return; } Acct.enter('register', e.value, p.value); },
+    logout() { Acct.logout(); },
+    showLogin() { S.passOpen = !S.passOpen; S.authErr = ''; render(); },
     settings() { if (!isCreator()) return; S.view = 'settings'; S.diffPreview = null; S.pinErr = ''; render(); scrollTo(0, 0); },
     choreWho(el) { S.choreAssign = el.value; render(); },
     delChore(el) { if (masterLocked()) return; Store.delDoc('chores/' + el.dataset.id); render(); },
@@ -1717,7 +1853,7 @@
       Store.saveHero(h);
       const p = clone(S.party || newParty());
       if (!p.creatorId || !S.heroes[p.creatorId]) { p.creatorId = h.id; Store.saveParty(p); }
-      S.me = h.id; lsSet('guilda-me:' + S.room, h.id); S.masterOk = false;
+      S.me = h.id; lsSet('guilda-me:' + S.room, h.id); S.masterOk = false; Acct.room(h.id);
       S.heroId = h.id; S.view = 'hero'; S.tab = 'tarefas'; S.draft = null; render(); scrollTo(0, 0);
       showToast(`<span><b>${esc(h.name)}</b> entrou para a guilda!</span>`);
     },
@@ -1790,7 +1926,7 @@
       const scope = el.dataset.scope, id = el.dataset.id;
       const t = scope === 'me' ? (hero().tasks || []).find((x) => x.id === id) : scope === 'board' ? S.board[id] : S.chores[id];
       if (!t) return; if (scope === 'chore' && masterLocked()) return;
-      S.modal = { type: 'editTask', scope, id, title: t.title, diff: t.diff, freq: scope === 'chore' && freqOf(t) === 'once' ? 'daily' : freqOf(Object.assign({ chore: scope === 'chore' }, t)), days: (t.days || []).slice(), every: t.every || 7, start: t.start || null, dom: t.dom || null, due: t.due || '', duo: !!t.duo, who: whoOf(t) }; render();
+      S.modal = { type: 'editTask', scope, id, title: t.title, diff: t.diff, freq: scope === 'chore' && freqOf(t) === 'once' ? 'daily' : freqOf(Object.assign({ chore: scope === 'chore' }, t)), days: (t.days || []).slice(), every: t.every || 7, start: t.start || null, dom: t.dom || null, from: t.from && t.from > today() ? t.from : t.created > today() ? t.created : null, due: t.due || '', duo: !!t.duo, who: whoOf(t) }; render();
     },
     edDiff(el) { S.modal.diff = el.dataset.v; keepEdit(); render(); },
     edDay(el) { const v = Number(el.dataset.v); const m = S.modal; keepEdit(); m.days = m.days.includes(v) ? m.days.filter((x) => x !== v) : m.days.concat(v); render(); },
@@ -1930,13 +2066,13 @@
     if (a === 'closeModal' && el.classList.contains('modal-bg') && ev.target !== el) return;
     if (el.tagName === 'INPUT') { actions[a] && actions[a](el, ev); return; }
     ev.preventDefault();
-    if (S.readOnly && ['saveHero', 'askRedeem', 'redeem', 'delReward', 'done', 'delTask', 'doneBoard', 'pickBoard', 'doneBoardAs', 'delBoard', 'setPinAsk', 'clearPin', 'delChore', 'toggleCo', 'openChest', 'openBday', 'askKudos', 'sendKudos', 'approve', 'reject', 'setApproval', 'reqOk', 'reqNo', 'reqDone', 'equipRelic', 'sellRelic', 'claimGoal', 'buyMerchant', 'respec', 'learn', 'mastery', 'buyGear', 'buyCos', 'buyPotion', 'equipCos', 'setCos', 'retire', 'look', 'randLook', 'forceBattle'].includes(a) && S.view !== 'create') return;
+    if (S.readOnly && ['saveHero', 'askRedeem', 'redeem', 'delReward', 'done', 'delTask', 'undoTask', 'undoBoard', 'doneBoard', 'pickBoard', 'doneBoardAs', 'delBoard', 'setPinAsk', 'clearPin', 'delChore', 'toggleCo', 'openChest', 'openBday', 'askKudos', 'sendKudos', 'approve', 'reject', 'setApproval', 'reqOk', 'reqNo', 'reqDone', 'equipRelic', 'sellRelic', 'claimGoal', 'buyMerchant', 'respec', 'learn', 'mastery', 'buyGear', 'buyCos', 'buyPotion', 'equipCos', 'setCos', 'retire', 'look', 'randLook', 'forceBattle'].includes(a) && S.view !== 'create') return;
     actions[a] && actions[a](el, ev);
   });
   let renameTimer = null, diffTimer = null;
   document.addEventListener('input', (ev) => {
     const el = ev.target;
-    if (['task-title', 'board-title', 'chore-title', 'rw-name', 'rw-cost', 'room-name'].includes(el.id)) { S.inputs = S.inputs || {}; S.inputs[el.id] = el.value; }
+    if (['task-title', 'board-title', 'chore-title', 'rw-name', 'rw-cost', 'room-name', 'acct-email'].includes(el.id)) { S.inputs = S.inputs || {}; S.inputs[el.id] = el.value; }
     if (el.id === 'room-code') { const v = normCode(el.value); if (v !== el.value) el.value = v; S.joinDraft = v; }
     if (el.id === 'diff-range') {
       const v = Number(el.value); S.diffPreview = v; const lv = levelFor(v);
@@ -1949,18 +2085,24 @@
   });
   document.addEventListener('change', (ev) => {
     if (ev.target.id === 'birth-edit' && !S.readOnly) { const h = hero(); const v = ev.target.value; if (h && (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v)) && v <= today()) { h.birth = v || null; saveCur(h); } }
+    if (ev.target.id === 'room-switch' && ev.target.value && ev.target.value !== S.room) { enterRoom(ev.target.value); return; }
     if (ev.target.id === 'new-every') S.newEvery = ev.target.value;
     if (ev.target.id === 'new-dom') S.newDom = ev.target.value;
+    if (ev.target.id === 'new-from') { S.newFrom = ev.target.value; render(); }
+    if (ev.target.id === 'ed-from' && S.modal && S.modal.type === 'editTask') { keepEdit(); S.modal.from = ev.target.value; render(); }
     if (ev.target.id === 'task-duo' || ev.target.id === 'board-duo') S.newDuo = ev.target.checked;
     if (['task-due', 'board-due', 'chore-due'].includes(ev.target.id)) S.newDue = ev.target.value;
     if (ev.target.id === 'diff-range' && !masterLocked()) { const p = clone(S.party); p.diffMul = Math.round(Number(ev.target.value) * 100) / 100; delete p.difficulty; Store.saveParty(p); S.chanceKey = ''; showToast(`<span>Dificuldade: <b>${levelFor(p.diffMul).name}</b> (${Math.round(p.diffMul * 100)}%)</span>`); }
   });
   function prune() { const old = addDays(today(), -30); requestList().filter((q) => (q.status === 'delivered' || q.status === 'refused') && q.day < old).forEach((q) => Store.delDoc('requests/' + q.id)); }
-  function readNewFreq() { const e = document.getElementById('new-every'), dm = document.getElementById('new-dom'); if (e) S.newEvery = e.value; if (dm) S.newDom = dm.value; return newFreqState(); }
+  function readNewFreq() { const e = document.getElementById('new-every'), dm = document.getElementById('new-dom'), fr = document.getElementById('new-from'); if (e) S.newEvery = e.value; if (dm) S.newDom = dm.value; if (fr) S.newFrom = fr.value; return newFreqState(); }
   function clearInput(id) { if (S.inputs) delete S.inputs[id]; }
   function addBoardTask(title, repeat, due, duo, who) {
     const id = 'b' + uidGen(); who = (who || []).filter((x) => S.heroes[x]);
-    Store.setDoc('board/' + id, Object.assign({ id, title, diff: S.newDiff }, freqFields(readNewFreq()), { due: due || null, duo: !!duo, who: who.length ? who : null, parts: [], partNames: [], created: today(), done: null, doneBy: null, doneByName: null, gain: 0, createdAt: Date.now() }));
+    const fq = freqFields(readNewFreq());
+    Store.setDoc('board/' + id, Object.assign({ id, title, diff: S.newDiff }, fq, { due: due || null, duo: !!duo, who: who.length ? who : null, parts: [], partNames: [], created: fq.from || today(), done: null, doneBy: null, doneByName: null, gain: 0, createdAt: Date.now() }));
+    if (fq.from) showToast(`<span>Missão agendada para <b>${D.WEEKDAYS[dowOf(fq.from)].toLowerCase()}, ${fmtDay(fq.from)}</b>.</span>`);
+    S.newFrom = null;
     post('new', `${S.me && S.heroes[S.me] ? S.heroes[S.me].name : 'Alguém'} fixou "${title}" no quadro da guilda`);
   }
   document.addEventListener('submit', (ev) => {
@@ -1968,6 +2110,12 @@
     if (form === 'pin') return submitPin();
     if (form === 'pinGate') { const v = (document.getElementById('pin-in').value || '').trim(); if (S.party && v === S.party.pin) { S.masterOk = true; S.pinErr = ''; } else S.pinErr = 'PIN incorreto.'; render(); return; }
     if (form === 'join') { enterRoom(document.getElementById('room-code').value); return; }
+    if (form === 'login') { const e = document.getElementById('acct-email'), p = document.getElementById('acct-pass'); if (!e.value.trim()) { e.focus(); return; } if (!p.value) { p.focus(); return; } Acct.enter('login', e.value, p.value); return; }
+    if (form === 'pass') {
+      const o = document.getElementById('pass-old').value, n = document.getElementById('pass-new').value;
+      Acct.call('pass', S.acct.token, o, n).then((r) => { Acct.keep(r); S.passOpen = false; render(); showToast('Senha trocada. Os outros aparelhos vão pedir login de novo.'); }).catch((e) => { S.authErr = String(e.message || e); render(); });
+      return;
+    }
     if (form === 'newroom') { createRoom(document.getElementById('room-name').value.trim() || 'Guilda da Família'); return; }
     if (S.readOnly) return;
     if (form === 'chore') {
@@ -1977,7 +2125,7 @@
       if (S.choreAssign !== 'all') { assign = [...document.querySelectorAll('.chore-h:checked')].map((x) => x.value); if (!assign.length) { showToast('Escolha pelo menos um herói.'); return; } }
       const fs = readNewFreq(); if (fs.freq === 'once') fs.freq = 'daily';
       const id = 'o' + uidGen(); Store.setDoc('chores/' + id, Object.assign({ id, title, diff: S.newDiff, assign }, freqFields(fs), { due: document.getElementById('chore-due').value || null, createdAt: Date.now() }));
-      S.newDue = ''; post('chore', `Nova tarefa obrigatória: "${title}"`);
+      S.newDue = ''; S.newFrom = null; post('chore', `Nova tarefa obrigatória: "${title}"`);
       inp.value = ''; clearInput(inp.id); render(); showToast(`<span>Tarefa obrigatória: <b>${esc(title)}</b></span>`); return;
     }
     if (form === 'reward') {
@@ -2000,8 +2148,9 @@
     if (S.newTarget === 'guild') { const duoEl = document.getElementById('task-duo'); addBoardTask(title, null, due, duoEl && duoEl.checked); inp.value = ''; clearInput(inp.id); S.newDue = ''; render(); showToast('<span>Missão fixada no <b>quadro da guilda</b>.</span>'); document.getElementById('task-title').focus(); return; }
     const h = hero(); h.tasks = h.tasks || [];
     if (h.tasks.length >= MAX_TASKS) { showToast(`Limite de ${MAX_TASKS} tarefas. Conclua ou apague algumas.`); return; }
-    h.tasks.push(Object.assign({ id: 't' + uidGen(), title, diff: S.newDiff }, freqFields(readNewFreq()), { due, created: today(), done: null, gain: 0 }));
-    const nt = h.tasks[h.tasks.length - 1]; if (!visibleToday(nt)) { const n = nextOn(nt, today()); showToast(`<span>Tarefa criada. Aparece ${n ? `${D.WEEKDAYS[dowOf(n)].toLowerCase()}, ${fmtDay(n)}` : 'nos dias marcados'}.</span>`); }
+    const fq = freqFields(readNewFreq()); S.newFrom = null;
+    h.tasks.push(Object.assign({ id: 't' + uidGen(), title, diff: S.newDiff }, fq, { due, created: fq.from || today(), done: null, gain: 0 }));
+    const nt = h.tasks[h.tasks.length - 1]; if (!visibleToday(nt)) { const n = nt.repeat ? nextOn(nt, dueDay(nt)) : dueDay(nt); showToast(`<span>Tarefa criada. Aparece ${n ? `${D.WEEKDAYS[dowOf(n)].toLowerCase()}, ${fmtDay(n)}` : 'nos dias marcados'}.</span>`); }
     inp.value = ''; clearInput(inp.id); S.newDue = ''; saveCur(h); document.getElementById('task-title').focus();
   });
   async function enterRoom(code) {
@@ -2015,8 +2164,10 @@
     await Store.open(code);
     S.busy = false;
     lsSet('guilda-last-room', code);
-    const me = lsGet('guilda-me:' + code, null);
+    let me = lsGet('guilda-me:' + code, null);
+    if (!(me && S.heroes[me])) { const am = Acct.heroIn(code); if (am && S.heroes[am]) { me = am; lsSet('guilda-me:' + code, am); } }
     S.me = me && S.heroes[me] ? me : null; S.masterOk = false;
+    Acct.room();
     S.view = S.me ? 'home' : 'select';
     tidyAll(); render(); scrollTo(0, 0);
     await resolveDay(false); maybeShowReport(); processInbox();
@@ -2052,8 +2203,8 @@
       if (parts.includes(heroId)) { showToast('Você já fez a sua parte. Falta o parceiro.'); return; }
       const share = Math.round(total * D.DUO_SHARE);
       let ok;
-      if (!parts.length) { ok = true; Store.setDoc('board/' + taskId, Object.assign(clone(t), { parts: [heroId], partNames: [h0.name] })); }
-      else ok = await Store.claim('board/' + taskId, { done: today(), doneBy: heroId, doneByName: h0.name, gain: share, parts: parts.concat(heroId), partNames: (t.partNames || []).concat(h0.name) });
+      if (!parts.length) { ok = true; Store.setDoc('board/' + taskId, Object.assign(clone(t), { parts: [heroId], partNames: [h0.name], partGains: [share] })); }
+      else ok = await Store.claim('board/' + taskId, { done: today(), doneBy: heroId, doneByName: h0.name, gain: share, parts: parts.concat(heroId), partNames: (t.partNames || []).concat(h0.name), partGains: (t.partGains || []).concat(share) });
       if (!ok) { showToast('Essa missão em dupla já foi fechada.'); render(); return; }
       const h = ensureHero(S.heroes[heroId] || h0); h.stats.done = (h.stats.done || 0) + 1; h.stats.duo = (h.stats.duo || 0) + 1; h.stats.board = (h.stats.board || 0) + 1;
       markDay(h); logDay(h, 't', 1); const ups = grantXp(h, share); checkAch(h); Store.saveHero(h); sfx('task');
@@ -2063,7 +2214,7 @@
       render(); return;
     }
     const pend = needsApproval(h0);
-    const ok = await Store.claim('board/' + taskId, { done: today(), doneBy: heroId, doneByName: h0.name, gain: total, pending: pend || null });
+    const ok = await Store.claim('board/' + taskId, { done: today(), doneBy: heroId, doneByName: h0.name, gain: total, pending: pend || null, punct: !pend && x.punctual ? true : null });
     if (!ok) { showToast('Alguém já cumpriu essa missão.'); render(); return; }
     const h = ensureHero(S.heroes[heroId] || h0); h.stats.done = (h.stats.done || 0) + 1; h.stats.byDiff[t.diff] = (h.stats.byDiff[t.diff] || 0) + 1;
     markDay(h); logDay(h, 't', 1);
@@ -2092,13 +2243,15 @@
     post(ok ? 'ok' : 'no', `${S.heroes[S.me].name} ${ok ? 'aprovou' : 'recusou'} "${(kind === 'task' ? (h.tasks.find((x) => x.id === id) || {}).title : S.board[id] && S.board[id].title) || 'tarefa'}" de ${h.name}`);
     showToast(ok ? 'Aprovada. O XP entra quando a pessoa abrir o app.' : 'Recusada.'); render();
   }
-  function keepEdit() { const m = S.modal; if (!m || m.type !== 'editTask') return; const ti = document.getElementById('ed-title'); if (ti) m.title = ti.value; const ee = document.getElementById('ed-every'); if (ee) m.every = ee.value; const ed = document.getElementById('ed-dom'); if (ed) m.dom = ed.value; const du = document.getElementById('ed-due'); if (du) m.due = du.value; const dd = document.getElementById('ed-duo'); if (dd) m.duo = dd.checked; }
+  function keepEdit() { const m = S.modal; if (!m || m.type !== 'editTask') return; const ti = document.getElementById('ed-title'); if (ti) m.title = ti.value; const ee = document.getElementById('ed-every'); if (ee) m.every = ee.value; const ed = document.getElementById('ed-dom'); if (ed) m.dom = ed.value; const du = document.getElementById('ed-due'); if (du) m.due = du.value; const dd = document.getElementById('ed-duo'); if (dd) m.duo = dd.checked; const ef = document.getElementById('ed-from'); if (ef) m.from = ef.value; }
   function saveEdit() {
     keepEdit(); const m = S.modal; const title = (m.title || '').trim(); if (!title) { document.getElementById('ed-title').focus(); return; }
     const fq = freqFields(m.scope === 'chore' && m.freq === 'once' ? Object.assign({}, m, { freq: 'daily' }) : m);
     const patch = Object.assign({ title, diff: m.diff, due: m.due || null }, fq);
-    if (m.scope === 'me') { const h = hero(); const t = h.tasks.find((x) => x.id === m.id); if (t) { Object.assign(t, patch); Store.saveHero(h); } }
-    else if (m.scope === 'board') { const b = S.board[m.id]; if (b) Store.setDoc('board/' + m.id, Object.assign(clone(b), patch, { duo: !!m.duo, who: (m.who || []).length ? m.who.slice() : null })); }
+    // mudar a data de início: tarefa agendada passa a aparecer só no novo dia; tirar a data traz para hoje
+    const redate = (t) => (fq.from ? { created: fq.from } : t.created > today() ? { created: today() } : {});
+    if (m.scope === 'me') { const h = hero(); const t = h.tasks.find((x) => x.id === m.id); if (t) { Object.assign(t, patch, t.done ? {} : redate(t)); Store.saveHero(h); } }
+    else if (m.scope === 'board') { const b = S.board[m.id]; if (b) Store.setDoc('board/' + m.id, Object.assign(clone(b), patch, b.done ? {} : redate(b), { duo: !!m.duo, who: (m.who || []).length ? m.who.slice() : null })); }
     else if (m.scope === 'chore' && !masterLocked()) { const c = S.chores[m.id]; if (c) { const { repeat, ...rest } = patch; Store.setDoc('chores/' + m.id, Object.assign(clone(c), rest)); } }
     S.modal = null; render(); showToast('Tarefa atualizada.');
   }
@@ -2119,6 +2272,7 @@
   async function start(snap) {
     render();
     await Store.init();
+    await Acct.load();
     S.ready = true;
     const room = (snap && snap.room) || lsGet('guilda-last-room', null);
     if (room) {

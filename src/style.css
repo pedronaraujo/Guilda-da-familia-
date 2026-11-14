@@ -672,3 +672,35 @@ s.small { opacity: .6; }
 .emo-pick .emo { width: 46px; height: 46px; font-size: 25px; line-height: 1; border-radius: 12px; background: var(--bg-2); border: 1.5px solid var(--line); cursor: pointer; display: grid; place-items: center; padding: 0; }
 .emo-pick .emo:hover { border-color: #ffffff40; }
 .emo-pick .emo[aria-pressed="true"] { border-color: var(--gold); background: #3a2a10; transform: scale(1.08); box-shadow: 0 0 0 3px #eab54c33; }
+
+/* ===== Conta e troca de salas ===== */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.acct-card { margin-bottom: 18px; }
+.acct-form { display: grid; gap: 10px; margin-top: 12px; grid-template-columns: 1fr 1fr; align-items: end; }
+.acct-form .field { margin: 0; }
+.acct-form .row, .acct-form p { grid-column: 1 / -1; }
+@media (max-width: 640px) { .acct-form { grid-template-columns: 1fr; } }
+.my-rooms { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.my-rooms li { display: flex; align-items: stretch; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.my-rooms .room-go { flex: 1; display: grid; gap: 2px; text-align: left; padding: 10px 12px; background: none; border: 0; color: var(--ink); cursor: pointer; }
+.my-rooms .room-go:hover { background: #ffffff0a; }
+.my-rooms .room-go b { color: var(--gold-2); font-size: 16px; }
+.my-rooms .del { align-self: center; margin-right: 6px; }
+.chip.room-sw { padding: 0 4px 0 10px; }
+.chip.room-sw select { background: transparent; color: var(--ink); border: 0; font-weight: 700; padding: 6px 6px; max-width: 220px; cursor: pointer; }
+.chip.room-sw select option { background: var(--panel); color: var(--ink); }
+
+/* ===== Quadro: rostos dos responsáveis e filtro ===== */
+.task .t .faces { display: inline-flex; vertical-align: middle; margin-left: 8px; }
+.faces .face + .face { margin-left: -7px; }
+.face { position: relative; width: 26px; height: 26px; border-radius: 50%; overflow: hidden; display: inline-grid; place-items: center; background: var(--bg-2); border: 1.5px solid var(--line); flex: none; }
+.face svg { position: absolute; width: 44px; height: 55px; left: 50%; top: -8px; transform: translateX(-50%); }
+.faces.any .face { border-style: dashed; }
+.face.did { border-color: var(--good); box-shadow: 0 0 0 2px #7fd37a44; }
+.board-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 14px; }
+.board-filter .who-item { font: inherit; color: var(--ink); }
+.board-filter .who-item.on { color: var(--gold-2); }
+.tag.sched { color: #9fd8ff; border-color: #9fd8ff55; background: #9fd8ff14; }
+.del.undo { color: var(--gold-2); font-size: 17px; }
+.del.undo:hover { background: #3a2a10; }
+.when .date-in { min-width: 150px; }

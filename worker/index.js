@@ -76,6 +76,88 @@ export class Room extends DurableObject {
   }
 }
 
+/* ---------------- Contas (login com e-mail e senha) ----------------
+   Cada conta vive num Durable Object próprio, endereçado pelo e-mail. A senha nunca é guardada:
+   só um "hash" PBKDF2 com sal aleatório. A sessão é um token "<e-mail em base64>.<aleatório>",
+   e a conta guarda só o SHA-256 da parte aleatória. */
+const ITER = 60000;
+const enc = new TextEncoder();
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+const randHex = (n) => hex(crypto.getRandomValues(new Uint8Array(n)));
+const sha = async (str) => hex(await crypto.subtle.digest('SHA-256', enc.encode(str)));
+async function pbkdf2(pass, salt) {
+  const key = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveBits']);
+  return hex(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(salt), iterations: ITER }, key, 256));
+}
+const sameStr = (a, b) => { if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
+const b64u = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = (s) => decodeURIComponent(escape(atob(String(s).replace(/-/g, '+').replace(/_/g, '/'))));
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,24}$/;
+const normEmail = (e) => { const s = String(e || '').trim().toLowerCase(); if (!EMAIL_RE.test(s)) throw new Error('E-mail inválido.'); return s; };
+const checkPass = (p) => { p = String(p || ''); if (p.length < 6) throw new Error('A senha precisa ter pelo menos 6 caracteres.'); if (p.length > 200) throw new Error('Senha longa demais.'); return p; };
+
+export class Account extends DurableObject {
+  async data() { return (await this.ctx.storage.get('acct')) || null; }
+  view(a) { return { email: a.email, rooms: a.rooms || [] }; }
+  async newSession(a) {
+    const rnd = randHex(24); a.sessions = (a.sessions || []).concat({ h: await sha(rnd), at: Date.now() }).slice(-10);
+    await this.ctx.storage.put('acct', a);
+    return { token: b64u(a.email) + '.' + rnd, ...this.view(a) };
+  }
+  async register(email, pass) {
+    if (await this.data()) throw new Error('Já existe uma conta com esse e-mail. Use Entrar.');
+    const salt = randHex(16);
+    const a = { email, salt, hash: await pbkdf2(pass, salt), rooms: [], sessions: [], createdAt: Date.now() };
+    return this.newSession(a);
+  }
+  async login(email, pass) {
+    const a = await this.data(); if (!a) throw new Error('E-mail ou senha incorretos.');
+    const now = Date.now();
+    if (a.lockUntil && a.lockUntil > now) throw new Error('Muitas tentativas. Espere um minuto e tente de novo.');
+    if (!sameStr(await pbkdf2(pass, a.salt), a.hash)) {
+      a.fails = (a.fails || 0) + 1; if (a.fails >= 5) { a.fails = 0; a.lockUntil = now + 60000; }
+      await this.ctx.storage.put('acct', a); throw new Error('E-mail ou senha incorretos.');
+    }
+    a.fails = 0; a.lockUntil = 0;
+    return this.newSession(a);
+  }
+  async auth(rnd) {
+    const a = await this.data(); if (!a) return null;
+    const h = await sha(String(rnd || '')); return (a.sessions || []).some((x) => x.h === h) ? a : null;
+  }
+  async me(rnd) { const a = await this.auth(rnd); if (!a) throw new Error('sessão expirada'); return this.view(a); }
+  async logout(rnd) {
+    const a = await this.auth(rnd); if (!a) return { ok: true };
+    const h = await sha(String(rnd)); a.sessions = a.sessions.filter((x) => x.h !== h); await this.ctx.storage.put('acct', a); return { ok: true };
+  }
+  async changePass(rnd, oldPass, newPass) {
+    const a = await this.auth(rnd); if (!a) throw new Error('sessão expirada');
+    if (!sameStr(await pbkdf2(oldPass, a.salt), a.hash)) throw new Error('A senha atual não confere.');
+    a.salt = randHex(16); a.hash = await pbkdf2(newPass, a.salt); a.sessions = [];
+    return this.newSession(a);
+  }
+  async roomSet(rnd, room) {
+    const a = await this.auth(rnd); if (!a) throw new Error('sessão expirada');
+    const list = (a.rooms || []).filter((r) => r.code !== room.code);
+    const prev = (a.rooms || []).find((r) => r.code === room.code) || {};
+    const hero = room.hero === undefined ? prev.hero || null : room.hero;
+    const heroName = room.hero === undefined ? prev.heroName || null : (room.heroName ? String(room.heroName).slice(0, 30) : null);
+    list.unshift({ code: room.code, name: String(room.name || prev.name || room.code).slice(0, 40), hero, heroName, at: Date.now() });
+    a.rooms = list.slice(0, 30); await this.ctx.storage.put('acct', a); return this.view(a);
+  }
+  async roomDel(rnd, code) {
+    const a = await this.auth(rnd); if (!a) throw new Error('sessão expirada');
+    a.rooms = (a.rooms || []).filter((r) => r.code !== code); await this.ctx.storage.put('acct', a); return this.view(a);
+  }
+}
+const acctOf = (env, email) => env.ACCOUNTS.get(env.ACCOUNTS.idFromName('acct:' + email));
+function splitToken(t) {
+  const [e, rnd] = String(t || '').split('.');
+  let email; try { email = normEmail(unb64u(e)); } catch (err) { throw new Error('sessão expirada'); }
+  if (!/^[0-9a-f]{48}$/.test(rnd || '')) throw new Error('sessão expirada');
+  return [email, rnd];
+}
+
 const roomOf = (env, c) => env.ROOMS.get(env.ROOMS.idFromName(c));
 
 async function call(env, fn, a) {
@@ -87,6 +169,13 @@ async function call(env, fn, a) {
     case 'api_delete': { const [c, rel] = split(a[0]); return roomOf(env, c).del(c, rel); }
     case 'api_claim': { const [c, rel] = split(a[0]); return roomOf(env, c).claim(c, rel, sized(a[1])); }
     case 'api_lock': { const c = code(a[0]); return roomOf(env, c).lock(a[1], a[2]); }
+    case 'auth_register': { const e = normEmail(a[0]); return acctOf(env, e).register(e, checkPass(a[1])); }
+    case 'auth_login': { const e = normEmail(a[0]); return acctOf(env, e).login(e, String(a[1] || '')); }
+    case 'auth_me': { const [e, r] = splitToken(a[0]); return acctOf(env, e).me(r); }
+    case 'auth_logout': { const [e, r] = splitToken(a[0]); return acctOf(env, e).logout(r); }
+    case 'auth_pass': { const [e, r] = splitToken(a[0]); return acctOf(env, e).changePass(r, String(a[1] || ''), checkPass(a[2])); }
+    case 'auth_room': { const [e, r] = splitToken(a[0]); const room = a[1] || {}; return acctOf(env, e).roomSet(r, { code: code(room.code), name: room.name, hero: room.hero === undefined ? undefined : (room.hero ? String(room.hero).slice(0, 40) : null), heroName: room.heroName }); }
+    case 'auth_room_del': { const [e, r] = splitToken(a[0]); return acctOf(env, e).roomDel(r, code(a[1])); }
     default: throw new Error('função desconhecida');
   }
 }

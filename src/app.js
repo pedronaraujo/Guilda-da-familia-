@@ -138,7 +138,13 @@
     },
     async poll() {
       if (!S.room) return;
-      try { const res = await gas('api_get', this.rev, S.room); S.stale = false; this.takeGas(res); }
+      const w = this.wseq || 0;
+      try {
+        const res = await gas('api_get', this.rev, S.room); S.stale = false;
+        // se alguém salvou enquanto a leitura estava no caminho, ela pode trazer o estado de antes: lê de novo
+        if ((this.wseq || 0) !== w) { if (!this.repoll) this.repoll = setTimeout(() => { this.repoll = null; this.poll(); }, 300); return; }
+        this.takeGas(res);
+      }
       catch (e) { console.warn('poll', e); S.stale = true; if (S.ready) render(); }
     },
     fail(e) {
@@ -152,7 +158,7 @@
       else showToast('Não deu para salvar agora. Tente de novo em instantes.');
     },
     write(key, fn) {
-      this.pending++;
+      this.pending++; this.wseq = (this.wseq || 0) + 1;
       const q = this.queues[key] || Promise.resolve();
       const run = () => fn().catch((e) => {
         if (e && e.code === 'unavailable') return new Promise((r) => setTimeout(r, 400 + Math.random() * 600)).then(fn);
@@ -180,7 +186,7 @@
       const full = this.full(path);
       if (S.mode === 'local') { const all = this.localAll(); const d = all[full]; if (!d || d.done) return false; Object.assign(d, patch); this.localSave(all); this.docs[path] = clone(d); applyDocs(this.docs); return true; }
       if (S.mode === 'gas') {
-        this.pending++;
+        this.pending++; this.wseq = (this.wseq || 0) + 1;
         try { const res = await gas('api_claim', full, patch); this.pending--; this.takeGas(res); return !!(res && res.ok); }
         catch (e) { this.pending--; this.fail(e); return false; }
       }
@@ -334,7 +340,7 @@
   const fmtBirth = (b) => { if (!b) return ''; const [y, m, d] = b.split('-'); return `${d}/${m}/${y}`; };
   const masterLocked = () => !isCreator() || !!(S.party && S.party.pin && !S.masterOk);
 
-  function chooseHero(id) { S.toast = null; S.me = id; S.meRoom = S.room; lsSet('guilda-me:' + S.room, S.me); S.masterOk = false; Acct.room(S.me); S.view = 'today'; tidyAll(); render(); scrollTo(0, 0); maybeShowReport(); processInbox(); }
+  function chooseHero(id) { S.toast = null; S.me = id; S.meRoom = S.room; lsSet('guilda-me:' + S.room, S.me); S.masterOk = false; Acct.room(S.me); S.view = 'home'; tidyAll(); render(); scrollTo(0, 0); maybeShowReport(); processInbox(); }
   // cópia de um herói de outra sala: leva nível, habilidades, visual, equipamentos e relíquias; tarefas e ouro recomeçam
   function importedHero(src, fromRoom) {
     const keep = ['name', 'cls', 'look', 'level', 'xp', 'points', 'mastery', 'skills', 'gear', 'cosmetics', 'relics', 'relicOn', 'birth', 'treeV', 'ach', 'stats', 'kudosLog'];
@@ -898,19 +904,19 @@
 
   /* ---------------- Tutorial passo a passo ---------------- */
   const TUT = [
-    { view: 'today', title: `Bem-vindo ao ${APP_NAME}!`, text: (h) => `Olá, ${h.name}! Aqui cada tarefa vira experiência para o seu herói e força para a guilda. ${Store.server ? 'O herói fica ligado à sua conta: só você e o organizador jogam com ele. ' : ''}São poucos passos.` },
-    { view: 'today', sel: '.tabbar', title: 'Cinco lugares, sempre à mão', text: () => `Hoje é o que fazer no dia. Guilda é o salão e a batalha. Herói é onde ele evolui. Prêmios é onde XP vira prêmio de verdade.${isCreator() ? ' Sala, só para o organizador, guarda as regras e as pendências.' : ''}` },
-    { view: 'today', sel: '.quickadd', title: 'Crie uma tarefa', text: () => 'Escreva o que vai fazer, escolha a dificuldade e toque em Adicionar. Em "Mais opções" dá para repetir, agendar, pôr horário ou mandar para a guilda.' },
-    { view: 'today', sel: '.daystrip', title: 'Seu dia num olhar', text: () => `XP de hoje${xpCap() ? ` (o limite da sala é ${xpCap()})` : ''}, tarefas feitas, sequência de dias e quem está em destaque. O destaque ganha ouro extra à meia-noite.` },
-    { view: 'today', sel: '.today .tasks', title: 'Concluir e desfazer', text: () => 'Toque no círculo para concluir. Toque no texto da tarefa para ver Editar, Desfazer e Apagar.' },
+    { view: 'home', title: `Bem-vindo ao ${APP_NAME}!`, text: (h) => `Olá, ${h.name}! Aqui cada tarefa vira experiência para o seu herói e força para a guilda. ${Store.server ? 'O herói fica ligado à sua conta: só você e o organizador jogam com ele. ' : ''}São poucos passos.` },
+    { view: 'home', sel: '.tabbar', title: 'Cinco lugares, sempre à mão', text: () => `Guilda é o salão e a batalha. Tarefas é o que fazer no dia. Herói é onde ele evolui e muda o visual. Prêmios tem a loja (ouro) e os prêmios de verdade (XP).${isCreator() ? ' Sala, só para o organizador, guarda as regras e as pendências.' : ''}` },
     { view: 'home', sel: '.nightfight', title: 'A batalha da meia-noite', text: () => 'Toda meia-noite a guilda enfrenta estes inimigos. Vencer dá ouro e avança de estágio. A chance aparece também no topo, ao lado da contagem.' },
     { view: 'home', sel: '.slot.other .kudos-btn', title: 'Elogios', text: () => `Elogie alguém com um emoji: a pessoa ganha XP. Você tem ${D.KUDOS_PER_DAY} elogios por dia, um para cada pessoa.` },
-    { view: 'hero', tab: 'habilidades', sel: '.tree', title: 'Evoluir', text: () => 'Cada nível dá 1 ponto. Gaste na árvore de habilidades. Dá para refazer tudo de graça ou trocar de classe sem perder o nível.' },
-    { view: 'hero', tab: 'loja', sel: '.shop-cats', title: 'Equipar', text: () => 'O ouro das batalhas compra equipamentos, poções e roupas. Em Visual você muda a aparência, inclusive com roupas temáticas.' },
-    { view: 'prizes', sel: '.rewards, .view-h', title: 'Prêmios', text: () => 'O XP que você ganha vira saldo para pedir prêmios de verdade, combinados com o organizador. A barra mostra quanto falta.' },
-    { view: 'today', sel: '.nav-btn', title: 'Seu menu', text: () => 'No seu rosto, no canto: trocar de herói ou de sala, convidar pessoas, som, menos animação, tutorial e sair da conta.' },
-    { view: 'today', sel: '.tabbar [data-v=settings]', title: 'Para o organizador', skip: () => !isCreator(), text: () => 'Na aba Sala ficam as pendências (pedidos, aprovações, feitas hoje) e quatro grupos: Pessoas, Regras do jogo, Prêmios e Sala e segurança.' },
-    { view: 'today', title: 'Pronto para a aventura!', text: () => 'Para rever este passo a passo, abra o seu menu no canto e toque em Tutorial.' },
+    { view: 'today', sel: '.quickadd', title: 'Crie uma tarefa', text: () => 'Na aba Tarefas, escreva o que vai fazer, escolha a dificuldade e toque em Adicionar. Em "Mais opções" dá para repetir, agendar, pôr horário ou mandar para a guilda.' },
+    { view: 'today', sel: '.daystrip', title: 'Seu dia num olhar', text: () => `XP de hoje${xpCap() ? ` (o limite da sala é ${xpCap()})` : ''}, tarefas feitas, sequência de dias e quem está em destaque. O destaque ganha ouro extra à meia-noite.` },
+    { view: 'today', sel: '.today .tasks', title: 'Concluir e desfazer', text: () => 'Toque no quadrado para concluir. Toque no texto da tarefa para ver Editar, Desfazer e Apagar.' },
+    { view: 'hero', tab: 'habilidades', sel: '.tree', title: 'Evoluir', text: () => 'Cada nível dá 1 ponto. Gaste na árvore de habilidades. Dá para refazer tudo de graça ou trocar de classe sem perder o nível. Em Visual você muda a aparência do herói.' },
+    { view: 'prizes', ptab: 'loja', sel: '.shop-cats', title: 'Loja', text: () => 'O ouro das batalhas compra equipamentos, poções, roupas e enfeites para o herói.' },
+    { view: 'prizes', ptab: 'premios', sel: '.rewards, .view-h', title: 'Prêmios reais', text: () => 'O XP que você ganha vira saldo para pedir prêmios de verdade, combinados com o organizador. A barra mostra quanto falta.' },
+    { view: 'home', sel: '.nav-btn', title: 'Seu menu', text: () => 'No seu rosto, no canto: trocar de herói ou de sala, convidar pessoas, som, menos animação, tutorial e sair da conta.' },
+    { view: 'home', sel: '.tabbar [data-v=settings]', title: 'Para o organizador', skip: () => !isCreator(), text: () => 'Na aba Sala ficam as pendências (pedidos, aprovações, feitas hoje) e quatro grupos: Pessoas, Regras do jogo, Prêmios e Sala e segurança.' },
+    { view: 'home', title: 'Pronto para a aventura!', text: () => 'Para rever este passo a passo, abra o seu menu no canto e toque em Tutorial.' },
   ];
   const tutOff = () => { try { return localStorage.getItem('guilda-notut') === '1'; } catch (e) { return false; } };
   function maybeStartTut() {
@@ -923,7 +929,7 @@
   function tutGo(i, dir) {
     while (i >= 0 && i < TUT.length) {
       const st = TUT[i];
-      if (st.view === 'hero') { S.view = 'hero'; S.heroId = S.me; S.tab = st.tab || 'habilidades'; } else { S.view = st.view; S.heroId = null; }
+      if (st.view === 'hero') { S.view = 'hero'; S.heroId = S.me; S.tab = st.tab || 'habilidades'; } else { S.view = st.view; S.heroId = null; } if (st.ptab) S.ptab = st.ptab;
       S.tut.i = i; render();
       if (!(st.skip && st.skip()) && (!st.sel || document.querySelector(st.sel))) break;
       i += dir;
@@ -983,7 +989,7 @@
   const NAV_ICONS = {
     today: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
     home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V9l4-3v3l4-4 4 4V6l4 3v12h-6v-5h-4v5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
-    hero: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 11a6 6 0 0 1 12 0v3H6Z M12 14v7 M8 21h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><path d="M12 5V2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    hero: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v7M6.5 11l5.5-1.5 5.5 1.5M12 15l-3.5 6M12 15l3.5 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     prizes: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h16v4H4Z M5 14h14v7H5Z M12 10v11 M12 10c-2-4-6-4-6-1.5S10 10 12 10c2 0 6 .5 6-1.5S14 6 12 10Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
     settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   };
@@ -992,7 +998,7 @@
   function prizeReady(h) { try { const bal = redeemBal(h); return rewardList().filter((r) => bal >= r.cost && !rewardBlock(r, h)).length; } catch (e) { return 0; } }
   function tabbar() {
     const me = S.me && S.heroes[S.me]; if (!me || !S.room) return '';
-    const tabs = [['today', 'Hoje', 0], ['home', 'Guilda', 0], ['hero', 'Herói', me.points || 0], ['prizes', 'Prêmios', prizeReady(me)]];
+    const tabs = [['home', 'Guilda', 0], ['today', 'Tarefas', 0], ['hero', 'Herói', me.points || 0], ['prizes', 'Prêmios', prizeReady(me)]];
     if (isCreator()) tabs.push(['settings', 'Sala', pendingCount()]);
     const cur = navCur();
     return `<nav class="tabbar" aria-label="Seções do app">${tabs.map(([v, n, b]) => `<button data-act="go" data-v="${v}" aria-current="${cur === v ? 'page' : 'false'}"><span class="ti">${NAV_ICONS[v]}</span><span class="tl">${n}</span>${b ? `<span class="dot" aria-label="${b} ${v === 'settings' ? 'pendências' : v === 'prizes' ? 'prêmios disponíveis' : 'pontos livres'}">${b}</span>` : ''}</button>`).join('')}</nav>`;
@@ -1356,19 +1362,19 @@
   function heroView(h) {
     const c = D.CLASSES[h.cls];
     const need = D.xpToNext(h.level);
-    // três abas: Evoluir (habilidades), Equipar (loja e visual) e Conquistas
-    if (!['habilidades', 'loja', 'visual', 'conquistas'].includes(S.tab)) S.tab = 'habilidades';
-    const tabs = [['habilidades', 'Evoluir'], ['equipar', 'Equipar'], ['conquistas', 'Conquistas']];
-    const curTab = ['loja', 'visual'].includes(S.tab) ? 'equipar' : S.tab;
+    // três abas: Evoluir (habilidades), Visual e Conquistas. A loja fica em Prêmios.
+    if (!['habilidades', 'visual', 'conquistas'].includes(S.tab)) S.tab = 'habilidades';
+    const tabs = [['habilidades', 'Evoluir'], ['visual', 'Visual'], ['conquistas', 'Conquistas']];
+    const curTab = S.tab;
     let body = '';
     if (S.tab === 'habilidades') body = skillsTab(h);
     else if (S.tab === 'conquistas') body = conquestTab(h);
-    else body = `<div class="seg subseg" role="group" aria-label="Equipar"><button data-act="tab" data-v="loja" aria-pressed="${S.tab === 'loja'}">Loja</button><button data-act="tab" data-v="visual" aria-pressed="${S.tab === 'visual'}">Visual</button></div>` + (S.tab === 'loja' ? shopTab(h) : visualTab(h));
+    else body = visualTab(h);
     return `<section class="hero-head"><div class="fig"><div class="idle">${A.heroSvg(h)}</div>${kudosStrip(h.id)}</div><div>
       <div class="eyebrow" style="color:${c.color}">${ancOf(h).name} · ${c.name} · ${c.role}</div><h2>${esc(h.name)}</h2>
       <div class="meta"><span class="chip">Nível <b class="num">${h.level}</b></span><span class="chip"><span class="coin"></span> <b class="num">${goldOf(h)}</b> ouro</span>${h.potion && h.potion.day === today() ? `<span class="chip warn">${esc((D.POTIONS.find((x) => x.id === h.potion.id) || {}).name || 'Poção')} esta noite</span>` : ''}${festaOf(h) ? `<span class="chip festa-chip"><span class="coin festa"></span> <b class="num">${festaOf(h)}</b> de festa</span>` : ''}<span class="chip"><span class="gem"></span> <b class="num">${redeemBal(h)}</b> XP de resgate</span>${streakNow(h) ? `<span class="chip streakchip"><b class="num">${streakNow(h)}</b> dia${streakNow(h) > 1 ? 's' : ''} seguido${streakNow(h) > 1 ? 's' : ''}</span>` : ''}${h.points ? `<span class="chip warn"><b class="num">${h.points}</b> ponto${h.points > 1 ? 's' : ''} de habilidade</span>` : ''}<span class="chip">Poder de combate <b class="num">${E.powerScore(E.heroStats(Object.assign({}, h, { bday: bdayBuffOn(h), potion: h.potion && h.potion.day === today() ? h.potion.id : null })))}</b></span></div>
       <div class="xpline"><span>Experiência</span><span class="num"><b>${h.xp}</b> / ${need} para o nível ${h.level + 1}${h.xpDebt ? ` <span class="muted" title="XP de tarefas desfeitas depois que o nível já tinha subido. As próximas tarefas pagam primeiro.">· −${h.xpDebt} a repor</span>` : ''}</span></div><div class="bar"><i style="width:${Math.round((h.xp / need) * 100)}%"></i></div></div></section>
-      <nav class="tabs" role="tablist">${tabs.map(([k, n]) => `<button role="tab" aria-selected="${curTab === k}" data-act="tab" data-v="${k === 'equipar' ? (S.tab === 'visual' ? 'visual' : 'loja') : k}">${n}${k === 'habilidades' && h.points ? `<span class="dot">${h.points}</span>` : ''}</button>`).join('')}</nav>${body}`;
+      <nav class="tabs" role="tablist">${tabs.map(([k, n]) => `<button role="tab" aria-selected="${curTab === k}" data-act="tab" data-v="${k}">${n}${k === 'habilidades' && h.points ? `<span class="dot">${h.points}</span>` : ''}</button>`).join('')}</nav>${body}`;
   }
   /* ----- Hoje: tudo o que dá para fazer no dia, numa lista só ----- */
   function todayView(h) {
@@ -1428,7 +1434,12 @@
   }
   /* ----- Prêmios: XP vira prêmio de verdade ----- */
   function prizesView(h) {
-    return `<div class="view-h"><div class="eyebrow">Prêmios</div><h2>XP vira prêmio de verdade</h2><p class="small muted" style="margin:4px 0 0">Ouro compra itens no jogo, na aba Herói. XP é trocado aqui por prêmios combinados com o organizador.</p></div>${rewardsTab(h)}${canMake('rewards', h.id) && !S.readOnly ? `<section class="card" style="margin-top:18px">${rewardsAdmin(false, !isCreator())}</section>` : ''}`;
+    const pt = S.ptab === 'premios' ? 'premios' : 'loja';
+    const head = `<div class="view-h"><div class="eyebrow">Prêmios</div><h2>Gaste o que você ganhou</h2><p class="small muted" style="margin:4px 0 0">Na Loja, o ouro das batalhas compra itens para o herói. Em Prêmios reais, o XP vira algo combinado com o organizador.</p>
+      <div class="meta" style="margin-top:10px"><span class="chip"><span class="coin"></span> <b class="num">${goldOf(h)}</b> ouro</span><span class="chip"><span class="gem"></span> <b class="num">${redeemBal(h)}</b> XP de resgate</span></div></div>
+      <nav class="tabs" role="tablist"><button role="tab" aria-selected="${pt === 'loja'}" data-act="ptab" data-v="loja">Loja</button><button role="tab" aria-selected="${pt === 'premios'}" data-act="ptab" data-v="premios">Prêmios reais${prizeReady(h) ? `<span class="dot">${prizeReady(h)}</span>` : ''}</button></nav>`;
+    if (pt === 'loja') return head + shopTab(h);
+    return head + `${rewardsTab(h)}${canMake('rewards', h.id) && !S.readOnly ? `<section class="card" style="margin-top:18px">${rewardsAdmin(false, !isCreator())}</section>` : ''}`;
   }
   /* ----- Conquistas: medalhas, elogios, sequência e números ----- */
   function conquestTab(h) {
@@ -2273,7 +2284,7 @@
     go(el) {
       const v = el.dataset.v; S.navOpen = false; S.openRow = null; if (!S.me) return render();
       if (v === 'settings') return actions.settings();
-      if (v === 'hero') { S.heroId = S.me; S.view = 'hero'; if (!['habilidades', 'loja', 'visual', 'conquistas'].includes(S.tab)) S.tab = 'habilidades'; S.selSkill = null; }
+      if (v === 'hero') { S.heroId = S.me; S.view = 'hero'; if (!['habilidades', 'visual', 'conquistas'].includes(S.tab)) S.tab = 'habilidades'; S.selSkill = null; }
       else S.view = v;
       sfx('tap'); tidyAll(); render(); scrollTo(0, 0);
     },
@@ -2286,7 +2297,7 @@
     toggleMotion(el) { const on = !!el.checked; document.documentElement.classList.toggle('reduce-motion', on); lsSet('guilda-motion', on ? 'less' : 'full'); render(); },
     navGo(el) {
       const v = el.dataset.v; S.navOpen = false;
-      if (v.startsWith('tab:')) { const k = v.slice(4); if (k === 'tarefas') return actions.go({ dataset: { v: 'today' } }); if (k === 'recompensas') return actions.go({ dataset: { v: 'prizes' } }); S.tab = k; return actions.go({ dataset: { v: 'hero' } }); }
+      if (v.startsWith('tab:')) { const k = v.slice(4); if (k === 'tarefas') return actions.go({ dataset: { v: 'today' } }); if (k === 'recompensas' || k === 'loja') { S.ptab = k === 'loja' ? 'loja' : 'premios'; return actions.go({ dataset: { v: 'prizes' } }); } S.tab = k; return actions.go({ dataset: { v: 'hero' } }); }
       if (['home', 'today', 'prizes', 'hero', 'settings'].includes(v)) return actions.go({ dataset: { v } });
       const fn = actions[v]; if (fn) fn.call(actions, el); else render();
     },
@@ -2407,7 +2418,7 @@
     shareInvite() { const url = inviteUrl(); try { navigator.share({ title: (S.roomMeta && S.roomMeta.name) || APP_NAME, text: inviteText(), url }).catch(() => {}); } catch (e) { /* sem compartilhar */ } },
     copyCode() { const c = S.room; try { navigator.clipboard.writeText(c).then(() => showToast(`Código <b>${c}</b> copiado.`), () => showToast(`Código da sala: <b>${c}</b>`)); } catch (e) { showToast(`Código da sala: <b>${c}</b>`); } },
     create() { if (!canCreateHero()) return; S.draft = { name: '', cls: 'guerreiro', look: randomLook('humano') }; S.view = 'create'; render(); scrollTo(0, 0); },
-    open(el) { if (el.dataset.id !== S.me) return; S.heroId = el.dataset.id; S.view = 'hero'; if (!['habilidades', 'loja', 'visual', 'conquistas'].includes(S.tab)) S.tab = 'habilidades'; S.selSkill = null; tidyAll(); render(); scrollTo(0, 0); },
+    open(el) { if (el.dataset.id !== S.me) return; S.heroId = el.dataset.id; S.view = 'hero'; if (!['habilidades', 'visual', 'conquistas'].includes(S.tab)) S.tab = 'habilidades'; S.selSkill = null; tidyAll(); render(); scrollTo(0, 0); },
     cls(el) { S.draft.cls = el.dataset.v; render(); },
     look(el) {
       const k = el.dataset.k, v = el.dataset.v;
@@ -2424,10 +2435,11 @@
       const p = clone(S.party || newParty());
       if (!p.creatorId || !S.heroes[p.creatorId]) { p.creatorId = h.id; Store.saveParty(p); }
       S.me = h.id; S.meRoom = S.room; lsSet('guilda-me:' + S.room, h.id); S.masterOk = false; Acct.room(h.id);
-      S.heroId = h.id; S.view = 'hero'; S.tab = 'tarefas'; S.draft = null; render(); scrollTo(0, 0);
+      S.heroId = null; S.view = 'home'; S.draft = null; render(); scrollTo(0, 0);
       showToast(`<span><b>${esc(h.name)}</b> entrou para a guilda!</span>`);
     },
-    tab(el) { S.tab = el.dataset.v; render(); },
+    tab(el) { if (el.dataset.v === 'loja') { S.ptab = 'loja'; return actions.go({ dataset: { v: 'prizes' } }); } S.tab = el.dataset.v; render(); },
+    ptab(el) { S.ptab = el.dataset.v; sfx('tap'); render(); },
     diff(el) { S.newDiff = el.dataset.v; render(); },
     freq(el) { S.newFreq = el.dataset.v; render(); },
     edFreq(el) { keepEdit(); S.modal.freq = el.dataset.v; render(); },
@@ -2821,7 +2833,7 @@
     if (!(me && S.heroes[me]) && Store.server && S.acct) { const mine = heroList().filter((h) => h.owner === myAcct()); if (mine.length === 1) me = mine[0].id; }
     S.me = me && S.heroes[me] ? me : null; S.masterOk = false; S.meRoom = S.me ? code : null;
     Acct.room();
-    S.view = S.me ? 'today' : 'select';
+    S.view = S.me ? 'home' : 'select';
     tidyAll(); render(); scrollTo(0, 0);
     await resolveDay(false); maybeShowReport(); processInbox();
   }

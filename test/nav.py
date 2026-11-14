@@ -9,13 +9,14 @@ def menu(P, v, wait=700):
     if v in TABS:
         P.click(f'.tabbar [data-v={TABS[v]}]'); W(P, wait)
         if TABS[v] == 'settings': open_groups(P)
+        if TABS[v] == 'prizes': P.click('.tabs [data-act=ptab][data-v=premios]'); W(P, 300)
         return
     if v.startswith('tab:'):
         k = v[4:]
+        if k == 'loja':
+            P.click('.tabbar [data-v=prizes]'); W(P, 400)
+            P.click('.tabs [data-act=ptab][data-v=loja]'); W(P, wait); return
         P.click('.tabbar [data-v=hero]'); W(P, 400)
-        if k in ('loja', 'visual'):
-            P.click('.tabs [role=tab]:nth-child(2)'); W(P, 300)
-            P.click(f'.subseg [data-v={k}]'); W(P, wait); return
         P.click(f'.tabs [data-v={k}]'); W(P, wait); return
     P.click('.nav-btn'); W(P, 250); P.click(f'.nav-it[data-v="{v}"]'); W(P, wait)
 
@@ -50,6 +51,5 @@ def show(P, title):
 def open_groups(P):
     """Na aba Sala, abre os quatro grupos (Pessoas, Regras, Prêmios, Sala e segurança)."""
     for _ in range(6):
-        sm = P.query_selector('details.sgroup:not([open]) > summary')
-        if not sm: return
-        sm.click(); W(P, 250)
+        if not P.query_selector('details.sgroup:not([open]) > summary'): return
+        P.click('details.sgroup:not([open]) > summary'); W(P, 250)

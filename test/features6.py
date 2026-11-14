@@ -51,8 +51,8 @@ with sync_playwright() as p:
     for _ in range(4):
         av = A.query_selector('.node.avail')
         if not av: break
-        av.click(); W(A, 250); lb = A.query_selector('[data-act=learn]:not([disabled])')
-        if lb: lb.click(); W(A, 500)
+        A.click('.node.avail'); W(A, 250); lb = A.query_selector('[data-act=learn]:not([disabled])')
+        if lb: A.click('[data-act=learn]:not([disabled])'); W(A, 500)
     A.click('[data-act=mastery]'); W(A, 600)
     h = hero(A, c1, 'Pedro'); spent = sum(h['skills'].values()) + h.get('mastery', 0)
     T(spent >= 2, f'aprendeu habilidades e treinou ({spent} pontos gastos)')

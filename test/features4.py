@@ -60,7 +60,7 @@ with sync_playwright() as p:
     items = A.inner_text('.nav-pop') if A.query_selector('.nav-pop') else ''
     T(all(x in items for x in ('Trocar de herói', 'Trocar de sala', 'Tutorial', 'Som', 'Sair da conta')), 'menu da conta tem trocar herói/sala, tutorial, som e sair')
     A.keyboard.press('Escape'); W(A, 200); nav.menu(A, 'tab:loja')
-    T(A.query_selector('.shop-cats') is not None, 'aba Herói > Equipar > Loja abre a loja')
+    T(A.query_selector('.shop-cats') is not None, 'aba Prêmios > Loja abre a loja')
     go_home(A)
     T(all(A.query_selector(f'.tabbar [data-v={v}]') for v in ('today', 'home', 'hero', 'prizes', 'settings')), 'barra de abas com Hoje, Guilda, Herói, Prêmios e Sala')
     # ---------- configurações: nome, vagas, importados ----------

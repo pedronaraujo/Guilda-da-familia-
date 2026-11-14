@@ -89,7 +89,7 @@ with sync_playwright() as p:
     for i in range(2):
         nav.row_act(A, f'Difícil {i}', 'undoTask', 1000)
     W(A, 1200); h2 = hero(A, casa, 'Ana')
-    T(h2['level'] == 2 and h2['xp'] == 0 and h2.get('xpDebt') == 120 - (xp), f'desfazer tira o XP sem tirar o nível: nível {h2["level"]}, xp {h2["xp"]}, a repor {h2.get("xpDebt")}')
+    T(h2['level'] == 2 and h2['xp'] == 0 and h2.get('xpDebt') == sum(t.get('gain', 0) for t in h['tasks'] if t['title'] in ('Difícil 0', 'Difícil 1')) - xp, f'desfazer tira o XP sem tirar o nível: nível {h2["level"]}, xp {h2["xp"]}, a repor {h2.get("xpDebt")}, ganhos {[t.get("gain") for t in h["tasks"] if t["title"].startswith("Difícil")]}, xp antes {xp}')
     nav.menu(A, 'hero'); T('a repor' in A.inner_text('.xpline'), 'ficha mostra o XP a repor'); nav.menu(A, 'today')
     nav.row_act(A, 'Difícil 2', 'undoTask', 1200)
     h3 = hero(A, casa, 'Ana')
